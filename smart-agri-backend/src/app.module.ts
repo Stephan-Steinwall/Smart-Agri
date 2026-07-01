@@ -8,6 +8,8 @@ import { Farm } from './farms/entities/farm.entity';
 import { Field } from './farms/entities/field.entity';
 import { Device } from './devices/entities/device.entity';
 import { SensorReading } from './telemetry/entities/sensor-reading.entity';
+import { TelemetryModule } from './telemetry/telemetry.module';
+import { DevicesModule } from './devices/devices.module';
 
 @Module({
   imports: [
@@ -31,6 +33,9 @@ import { SensorReading } from './telemetry/entities/sensor-reading.entity';
       // Uncomment the line below if you want to see the raw SQL queries in your terminal
       // logging: true, 
     }),
+
+    TelemetryModule,
+    DevicesModule,
   ],
   controllers: [],
   providers: [],
