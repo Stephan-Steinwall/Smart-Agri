@@ -10,6 +10,7 @@ import { Device } from './devices/entities/device.entity';
 import { SensorReading } from './telemetry/entities/sensor-reading.entity';
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { DevicesModule } from './devices/devices.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { DevicesModule } from './devices/devices.module';
 
     TelemetryModule,
     DevicesModule,
+    AiModule,
   ],
   controllers: [],
   providers: [],

@@ -8,5 +8,6 @@ import { TelemetryController } from './telemetry.controller';
     imports: [TypeOrmModule.forFeature([SensorReading])],
     providers: [TelemetryService],
     controllers: [TelemetryController],
+    exports: [TelemetryService],
 })
 export class TelemetryModule { }
