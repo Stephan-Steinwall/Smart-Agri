@@ -7,6 +7,11 @@ export enum DeviceType {
     NODE = 'NODE',
 }
 
+export enum OperatingMode {
+    PORTABLE = 'PORTABLE', // Carried around by the farmer
+    FIXED = 'FIXED',       // Stuck in the ground permanently
+}
+
 @Entity('devices')
 export class Device {
     @PrimaryGeneratedColumn('uuid')
@@ -24,10 +29,15 @@ export class Device {
     @Column({ type: 'float', nullable: true })
     batteryStatus: number;
 
+    @Column({ type: 'enum', enum: OperatingMode, default: OperatingMode.FIXED })
+    operatingMode: OperatingMode;
+
     @UpdateDateColumn()
     lastSeen: Date;
 
     // Many Devices belong to One Field
     @ManyToOne(() => Field, (field) => field.devices, { onDelete: 'SET NULL' })
-    field: Field;
+    field: Field | null;
+
+
 }

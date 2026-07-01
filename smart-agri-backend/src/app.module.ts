@@ -11,6 +11,11 @@ import { SensorReading } from './telemetry/entities/sensor-reading.entity';
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { DevicesModule } from './devices/devices.module';
 import { AiModule } from './ai/ai.module';
+import { CropProfile } from './crops/entities/crop-profile.entity';
+import { AutomationDevice } from './automation/entities/automation-device.entity';
+import { AutomationRule } from './automation/entities/automation-rule.entity';
+import { PumpLog } from './automation/entities/pump-log.entity';
+import { AutomationModule } from './automation/automation.module';
 
 @Module({
   imports: [
@@ -25,7 +30,7 @@ import { AiModule } from './ai/ai.module';
       username: 'postgres',
       password: 'superuser',
       database: 'smart_agri_db',
-      entities: [User, Farm, Field, Device, SensorReading],
+      entities: [User, Farm, Field, Device, SensorReading, CropProfile, AutomationDevice, AutomationRule, PumpLog],
 
       // Auto-creates database tables based on your entities.
       // NOTE: Keep this 'true' for development, but 'false' in production!
@@ -38,6 +43,7 @@ import { AiModule } from './ai/ai.module';
     TelemetryModule,
     DevicesModule,
     AiModule,
+    AutomationModule,
   ],
   controllers: [],
   providers: [],
