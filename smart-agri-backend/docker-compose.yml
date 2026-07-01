@@ -1,0 +1,16 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: smart_agri_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: superuser
+      POSTGRES_DB: smart_agri_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    restart: always
+
+volumes:
+  timescaledb_data:
