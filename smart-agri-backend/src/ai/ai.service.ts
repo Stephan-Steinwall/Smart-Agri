@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import OpenAI from 'openai';
 import { TelemetryService } from '../telemetry/telemetry.service';
+import { Field } from '../farms/entities/field.entity';
+import { DeviceType, OperatingMode } from '../devices/entities/device.entity';
 
 @Injectable()
 export class AiService {
@@ -10,6 +14,8 @@ export class AiService {
     constructor(
         private configService: ConfigService,
         private telemetryService: TelemetryService,
+        @InjectRepository(Field)
+        private fieldRepo: Repository<Field>,
     ) {
         this.openai = new OpenAI({
             apiKey: this.configService.get<string>('OPENAI_API_KEY'),
@@ -57,5 +63,68 @@ export class AiService {
         return {
             answer: response.choices[0].message.content,
         };
+    }
+
+    async generateFieldInsight(fieldId: string) {
+        // 1. Fetch Field and Crop Profile
+        const field = await this.fieldRepo.findOne({
+            where: { id: fieldId },
+            relations: { cropProfile: true, devices: true }, // Bring the crop profile and devices!
+        });
+
+        if (!field || !field.cropProfile) {
+            return { error: "Field or Crop Profile not found." };
+        }
+
+        // 2. Find the fixed node in this field to get readings
+        const fixedNode = field.devices.find(
+            d => d.operatingMode === OperatingMode.FIXED && d.deviceType === DeviceType.NODE
+        );
+        if (!fixedNode) return { error: "No fixed sensor node found in this field." };
+
+        // 3. Get the latest reading
+        const reading = await this.telemetryService.getLatestReading(fixedNode.id);
+        if (!reading) return { error: 'No sensor readings found for this field.' };
+
+        // 4. Force OpenAI to return structured JSON
+        const systemPrompt = `
+      You are an expert AI Agronomist monitoring a field of ${field.cropProfile.name}.
+      
+      IDEAL CONDITIONS FOR ${field.cropProfile.name.toUpperCase()}:
+      - Min Moisture: ${field.cropProfile.minMoisturePercent}%
+      - Min Nitrogen: ${field.cropProfile.minNitrogen} ppm
+      - Min Phosphorus: ${field.cropProfile.minPhosphorus} ppm
+      - Min Potassium: ${field.cropProfile.minPotassium} ppm
+      - Ideal pH: ${field.cropProfile.idealPhLevel}
+      
+      CURRENT LIVE READINGS:
+      - Moisture: ${reading.moisture}%
+      - Nitrogen: ${reading.nitrogen} ppm
+      - Phosphorus: ${reading.phosphorus} ppm
+      - Potassium: ${reading.potassium} ppm
+      - pH: ${reading.ph}
+
+      Analyze the current readings against the ideal conditions. 
+      Respond ONLY with a valid JSON object matching this exact structure:
+      {
+        "healthScore": number (0-100),
+        "status": string ("Optimal", "Moderate", "Critical"),
+        "riskLevel": string ("Low", "Medium", "High"),
+        "primaryAction": string (A short, 3-5 word command, e.g., "Dose Nitrogen Now"),
+        "detailedReason": string (1-2 sentence explanation of why you recommend this action)
+      }
+    `;
+
+        const response = await this.openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [{ role: 'system', content: systemPrompt }],
+            temperature: 0.1,
+            response_format: { type: "json_object" } // This guarantees perfect JSON output
+        });
+
+        // Parse the JSON string from OpenAI into a real Javascript object
+        const content = response.choices[0].message.content;
+        if (!content) return { error: 'AI returned an empty response.' };
+        return JSON.parse(content);
     }
 }

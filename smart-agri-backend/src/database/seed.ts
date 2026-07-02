@@ -210,6 +210,15 @@ async function bootstrap() {
     await pumpLogRepo.save(logs);
 
     console.log('✅ Phase 1 Seeding Complete! The system is now Automation and AI ready.');
+
+    console.log('\n======================================================');
+    console.log('🚀 DEVELOPMENT TESTING UUIDs (Copy-paste these!)');
+    console.log('======================================================');
+    console.log(`🍅 Tomato Field ID:  ${fieldA.id}`);
+    console.log(`🌶️ Chilli Field ID:  ${fieldB.id}`);
+    console.log(`📡 Fixed IoT Node ID: ${node1.id}`);
+    console.log(`📱 Portable Node ID:  ${portableReader.id}`);
+    console.log('======================================================\n');
     await app.close();
 }
 
