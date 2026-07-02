@@ -1,13 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { SensorReading } from './entities/sensor-reading.entity';
+import { Device, OperatingMode } from '../devices/entities/device.entity'; // Import Device
 
 @Injectable()
 export class TelemetryService {
     constructor(
         @InjectRepository(SensorReading)
         private telemetryRepo: Repository<SensorReading>,
+        private dataSource: DataSource,
     ) { }
 
     // Get the absolute newest reading for our Live Cards
@@ -26,5 +28,15 @@ export class TelemetryService {
             take: 50, // Get last 50 data points
         });
         return data.reverse(); // Reverse so the chart goes left-to-right (old to new)
+    }
+
+    async getHistoryByField(fieldId: string) {
+        const device = await this.dataSource.getRepository(Device).findOne({
+            where: { field: { id: fieldId }, operatingMode: OperatingMode.FIXED }
+        });
+
+        if (!device) return []; // If no sensor (like the Chillies!), return empty array
+
+        return this.getHistoricalData(device.id);
     }
 }

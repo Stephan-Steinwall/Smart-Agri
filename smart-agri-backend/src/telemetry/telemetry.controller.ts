@@ -14,4 +14,10 @@ export class TelemetryController {
     getHistory(@Param('deviceId') deviceId: string) {
         return this.telemetryService.getHistoricalData(deviceId);
     }
+
+    @Get('field-history/:fieldId')
+    async getHistoryByField(@Param('fieldId') fieldId: string) {
+        // We will ask the TelemetryService to handle this!
+        return this.telemetryService.getHistoryByField(fieldId);
+    }
 }
