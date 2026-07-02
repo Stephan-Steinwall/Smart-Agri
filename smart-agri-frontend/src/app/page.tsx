@@ -12,9 +12,9 @@ export default function Dashboard() {
 
   // Step 1: Fetch all devices to dynamically get the first sensor node UUID
   const { data: devices, isLoading: devicesLoading, isError: devicesError } = useQuery({
-    queryKey: ['devices'],
+    queryKey: ['sensor-nodes'],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/devices`);
+      const res = await axios.get(`${API_BASE}/devices/sensor-nodes`);
       return res.data;
     },
     retry: 2,

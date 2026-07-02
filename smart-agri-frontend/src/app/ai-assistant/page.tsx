@@ -20,9 +20,9 @@ export default function AiAssistant() {
 
     // Dynamically fetch the first device UUID — same pattern as the main dashboard
     const { data: devices, isLoading: devicesLoading, isError: devicesError } = useQuery({
-        queryKey: ['devices'],
+        queryKey: ['sensor-nodes'],
         queryFn: async () => {
-            const res = await axios.get(`${API_BASE}/devices`);
+            const res = await axios.get(`${API_BASE}/devices/sensor-nodes`);
             return res.data;
         },
         retry: 2,

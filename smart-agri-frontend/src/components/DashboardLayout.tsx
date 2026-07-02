@@ -1,6 +1,6 @@
 // src/components/DashboardLayout.tsx
 import Link from 'next/link';
-import { Sprout, LayoutDashboard, Settings, Map, Bot } from 'lucide-react';
+import { Sprout, LayoutDashboard, Settings, Map, Bot, Power, MapPin } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     return (
@@ -28,6 +28,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <Link href="/settings" className="flex items-center px-4 py-3 rounded-lg text-muted-foreground hover:bg-muted transition-colors">
                         <Settings className="w-5 h-5 mr-3" />
                         Device Config
+                    </Link>
+                    <Link href="/automation" className="flex items-center px-4 py-3 rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+                        <Power className="w-5 h-5 mr-3" />
+                        Automation Control
+                    </Link>
+                    <Link href="/portable" className="flex items-center px-4 py-3 rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+                        <MapPin className="w-5 h-5 mr-3" />
+                        Portable Readings
                     </Link>
                 </nav>
             </aside>

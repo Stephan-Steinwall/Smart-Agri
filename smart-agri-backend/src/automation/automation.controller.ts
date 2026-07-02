@@ -1,7 +1,7 @@
 import { Controller, Get, Param, Post, Body } from '@nestjs/common';
 import { AutomationService } from './automation.service';
 
-@Controller('api/v1/automation')
+@Controller('automation')
 export class AutomationController {
     constructor(private readonly automationService: AutomationService) { }
 
