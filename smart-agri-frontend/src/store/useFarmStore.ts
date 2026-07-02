@@ -7,10 +7,9 @@ interface FarmState {
 }
 
 export const useFarmStore = create<FarmState>((set) => ({
-    // IMPORTANT: Paste your actual Tomato Field UUID here so it loads by default
-    activeFieldId: 'YOUR-FIELD-A-UUID',
-    activeFieldName: 'Field A - Tomatoes',
+    // Starts as null — FieldSelector auto-populates it from the backend
+    activeFieldId: null,
+    activeFieldName: '',
 
-    // The action to update the state
     setActiveField: (id, name) => set({ activeFieldId: id, activeFieldName: name }),
 }));

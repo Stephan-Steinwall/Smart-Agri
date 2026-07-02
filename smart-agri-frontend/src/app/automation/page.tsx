@@ -6,38 +6,26 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Power, Activity, Settings2, WifiOff, Loader2 } from 'lucide-react';
+import { useFarmStore } from '@/store/useFarmStore';
 
 const API_BASE = 'http://localhost:3001/api/v1';
 
 export default function AutomationDashboard() {
     const queryClient = useQueryClient();
+    const { activeFieldId, activeFieldName } = useFarmStore();
 
-    // Step 1: Fetch sensor nodes (FIXED NODEs) to resolve the field UUID dynamically
-    const { data: sensorNodes, isLoading: nodesLoading, isError: nodesError } = useQuery({
-        queryKey: ['sensor-nodes'],
+    // Fetch automation devices for the currently selected field
+    const { data: devices, isLoading, isError } = useQuery({
+        queryKey: ['automation', activeFieldId],
         queryFn: async () => {
-            const res = await axios.get(`${API_BASE}/devices/sensor-nodes`);
+            const res = await axios.get(`${API_BASE}/automation/field/${activeFieldId}`);
             return res.data;
         },
-        retry: 2,
-        staleTime: 5 * 60 * 1000,
-    });
-
-    // Extract the field ID from the first sensor node's field relation
-    const fieldId = sensorNodes?.[0]?.field?.id ?? null;
-
-    // Step 2: Fetch automation devices for that field (only runs once fieldId is resolved)
-    const { data: devices, isLoading: devicesLoading } = useQuery({
-        queryKey: ['automation', fieldId],
-        queryFn: async () => {
-            const res = await axios.get(`${API_BASE}/automation/field/${fieldId}`);
-            return res.data;
-        },
-        enabled: !!fieldId,
+        enabled: !!activeFieldId,
         retry: 2,
     });
 
-    // 3. Mutation to Toggle Pump ON/OFF
+    // Mutation to Toggle Pump ON/OFF
     const toggleMutation = useMutation({
         mutationFn: async ({ deviceId, turnOn }: { deviceId: string; turnOn: boolean }) => {
             const res = await axios.post(`${API_BASE}/automation/toggle`, {
@@ -47,12 +35,25 @@ export default function AutomationDashboard() {
             return res.data;
         },
         onSuccess: () => {
-            // Instantly refresh the UI to show the new status and updated logs
-            queryClient.invalidateQueries({ queryKey: ['automation', fieldId] });
+            queryClient.invalidateQueries({ queryKey: ['automation', activeFieldId] });
         }
     });
 
-    const isLoading = nodesLoading || devicesLoading;
+    if (!activeFieldId) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <Card className="max-w-md w-full">
+                    <CardContent className="pt-6 text-center space-y-3">
+                        <WifiOff className="w-12 h-12 text-muted-foreground mx-auto" />
+                        <h2 className="text-lg font-semibold">No Field Selected</h2>
+                        <p className="text-sm text-muted-foreground">
+                            Use the field selector in the header to choose a field.
+                        </p>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
 
     if (isLoading) {
         return (
@@ -65,7 +66,7 @@ export default function AutomationDashboard() {
         );
     }
 
-    if (nodesError || !fieldId) {
+    if (isError) {
         return (
             <div className="flex items-center justify-center h-full">
                 <Card className="max-w-md w-full">
@@ -76,9 +77,6 @@ export default function AutomationDashboard() {
                             Ensure the backend is running on{' '}
                             <code className="bg-muted px-1 rounded">http://localhost:3001</code> and the database has been seeded.
                         </p>
-                        {!fieldId && !nodesError && (
-                            <p className="text-xs text-amber-500">No sensor nodes found. Run the seeder first.</p>
-                        )}
                     </CardContent>
                 </Card>
             </div>
@@ -88,11 +86,11 @@ export default function AutomationDashboard() {
     return (
         <div className="space-y-6">
             <div>
-                <h2 className="text-2xl font-bold tracking-tight">Automation Control</h2>
+                <h2 className="text-2xl font-bold tracking-tight">Automation Control: {activeFieldName}</h2>
                 <p className="text-muted-foreground">
                     Manage your fixed irrigation and fertigation systems.
                     <span className="ml-2 text-xs">
-                        Field: <code className="bg-muted px-1 rounded">{fieldId}</code>
+                        Field: <code className="bg-muted px-1 rounded">{activeFieldId}</code>
                     </span>
                 </p>
             </div>

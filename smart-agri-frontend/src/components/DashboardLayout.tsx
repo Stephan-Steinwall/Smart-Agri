@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { Sprout, LayoutDashboard, Settings, Map, Bot, Power, MapPin, Download } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+import FieldSelector from './FieldSelector';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     return (
@@ -50,6 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <header className="h-16 border-b border-border bg-card flex items-center px-8 justify-between">
                     <h1 className="text-xl font-semibold text-foreground">Farm Overview</h1>
                     <div className="flex items-center space-x-4">
+                        <FieldSelector />
                         <NotificationBell />
                         <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm shadow-sm">
                             F
