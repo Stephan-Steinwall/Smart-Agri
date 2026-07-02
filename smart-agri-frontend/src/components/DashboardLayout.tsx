@@ -1,6 +1,6 @@
 // src/components/DashboardLayout.tsx
 import Link from 'next/link';
-import { Sprout, LayoutDashboard, Settings, Map, Bot, Power, MapPin } from 'lucide-react';
+import { Sprout, LayoutDashboard, Settings, Map, Bot, Power, MapPin, Download } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -37,6 +37,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <Link href="/portable" className="flex items-center px-4 py-3 rounded-lg text-muted-foreground hover:bg-muted transition-colors">
                         <MapPin className="w-5 h-5 mr-3" />
                         Portable Readings
+                    </Link>
+                    <Link href="/reports" className="flex items-center px-4 py-3 rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+                        <Download className="w-5 h-5 mr-3" />
+                        Data Reports
                     </Link>
                 </nav>
             </aside>
