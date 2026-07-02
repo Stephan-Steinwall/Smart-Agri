@@ -14,6 +14,10 @@ import { AutomationDevice, AutomationMode } from '../automation/entities/automat
 import { PumpLog, TriggerSource } from '../automation/entities/pump-log.entity';
 import { AutomationRule, ConditionOperator } from '../automation/entities/automation-rule.entity';
 
+// Green Valley Farms — Western Province, Sri Lanka
+// Farm center: ~6.9271, 79.8612
+const FARM_CENTER = { lat: 6.9271, lng: 79.8612 };
+
 async function bootstrap() {
     console.log('🌱 Starting Advanced Database Seeder (Phase 1)...');
 
@@ -121,38 +125,63 @@ async function bootstrap() {
         targetDevice: waterPumpA,
     });
 
-    console.log('📡 Provisioning IoT Devices (Fixed & Portable)...');
+    console.log('📡 Provisioning IoT Devices (Fixed & Portable) with GPS coordinates...');
+
+    // Central Hub — located near farm entrance
     const hub = await deviceRepo.save({
         macAddress: 'AA:BB:CC:DD:EE:01',
+        alias: 'Central Hub',
         deviceType: DeviceType.HUB,
         operatingMode: OperatingMode.FIXED,
         isOnline: true,
         batteryStatus: 100,
+        loraSignalStrength: -55,
+        latitude: FARM_CENTER.lat,
+        longitude: FARM_CENTER.lng,
         field: fieldA,
     });
 
-    // This is our Fixed Node in the ground
+    // Fixed Sensor Node Alpha — buried in Field A (Tomatoes), ~100m north-west
     const node1 = await deviceRepo.save({
         macAddress: 'AA:BB:CC:DD:EE:02',
+        alias: 'Sensor Node Alpha',
         deviceType: DeviceType.NODE,
         operatingMode: OperatingMode.FIXED,
         isOnline: true,
         batteryStatus: 85,
+        loraSignalStrength: -68,
+        latitude: FARM_CENTER.lat + 0.0008,  // ~90m north
+        longitude: FARM_CENTER.lng - 0.0006, // ~60m west
         field: fieldA,
     });
 
-    // This is the Portable Reader the farmer carries around
+    // Fixed Sensor Node Beta — buried in Field B (Chillies), ~200m south-east
+    const node2 = await deviceRepo.save({
+        macAddress: 'AA:BB:CC:DD:EE:04',
+        alias: 'Sensor Node Beta',
+        deviceType: DeviceType.NODE,
+        operatingMode: OperatingMode.FIXED,
+        isOnline: true,
+        batteryStatus: 72,
+        loraSignalStrength: -79,
+        latitude: FARM_CENTER.lat - 0.0015, // ~165m south
+        longitude: FARM_CENTER.lng + 0.0012, // ~120m east
+        field: fieldB,
+    });
+
+    // Portable Reader — the handheld reader the farmer carries for spot-checks
     const portableReader = await deviceRepo.save({
         macAddress: 'AA:BB:CC:DD:EE:03',
+        alias: 'Portable Reader',
         deviceType: DeviceType.NODE,
         operatingMode: OperatingMode.PORTABLE,
         isOnline: true,
         batteryStatus: 92,
-        field: null, // Portable, so it's not tied to one field permanently
+        latitude: FARM_CENTER.lat + 0.0003,
+        longitude: FARM_CENTER.lng + 0.0004,
     });
 
-    console.log('📈 Generating Time-Series Data & Pump Logs...');
-    // We will just generate 7 days of data for a quicker seed this time
+    console.log('📈 Generating Time-Series Data (Fixed Node Alpha) & Pump Logs...');
     const readings: SensorReading[] = [];
     const logs: PumpLog[] = [];
     const endDate = new Date();
@@ -168,7 +197,7 @@ async function bootstrap() {
         currentMoisture -= 0.15;
         if (hour >= 10 && hour <= 15) currentMoisture -= 0.2;
 
-        // Simulate our new Rule Engine: If moisture drops below 30, the pump turns on!
+        // Simulate our Rule Engine: If moisture drops below 30, the pump turns on!
         if (currentMoisture < 30) {
             currentMoisture = 85; // Soil is wet again
 
@@ -193,9 +222,42 @@ async function bootstrap() {
                 nitrogen: parseFloat(currentN.toFixed(2)),
                 phosphorus: 35,
                 potassium: 42,
-                ph: 6.2 + (Math.random() * 0.2 - 0.1),
+                ph: parseFloat((6.2 + (Math.random() * 0.2 - 0.1)).toFixed(2)),
                 electricalConductivity: 1.8,
                 batteryLevel: 85,
+            })
+        );
+    }
+
+    console.log('📈 Generating Portable Reader Spot-Check Readings (last 24h)...');
+    // Simulate 8 spot-checks the farmer took yesterday across the farm
+    const spotCheckOffsets = [
+        { latOff: 0.0005, lngOff: -0.0003 },
+        { latOff: 0.0010, lngOff: 0.0002 },
+        { latOff: -0.0005, lngOff: 0.0008 },
+        { latOff: 0.0002, lngOff: 0.0010 },
+        { latOff: -0.0008, lngOff: -0.0002 },
+        { latOff: 0.0012, lngOff: -0.0005 },
+        { latOff: -0.0003, lngOff: 0.0015 },
+        { latOff: 0.0007, lngOff: 0.0007 },
+    ];
+
+    for (let i = 0; i < spotCheckOffsets.length; i++) {
+        const checkTime = new Date();
+        checkTime.setHours(checkTime.getHours() - (i * 2 + 1)); // Every 2 hours over past 16h
+
+        readings.push(
+            telemetryRepo.create({
+                time: checkTime,
+                deviceId: portableReader.id,
+                temperature: parseFloat((24 + Math.random() * 8).toFixed(2)),
+                moisture: parseFloat((35 + Math.random() * 30).toFixed(2)),
+                nitrogen: parseFloat((40 + Math.random() * 20).toFixed(2)),
+                phosphorus: parseFloat((28 + Math.random() * 14).toFixed(2)),
+                potassium: parseFloat((35 + Math.random() * 15).toFixed(2)),
+                ph: parseFloat((5.8 + Math.random() * 0.8).toFixed(2)),
+                electricalConductivity: parseFloat((1.4 + Math.random() * 0.8).toFixed(2)),
+                batteryLevel: 92,
             })
         );
     }
@@ -214,10 +276,12 @@ async function bootstrap() {
     console.log('\n======================================================');
     console.log('🚀 DEVELOPMENT TESTING UUIDs (Copy-paste these!)');
     console.log('======================================================');
-    console.log(`🍅 Tomato Field ID:  ${fieldA.id}`);
-    console.log(`🌶️ Chilli Field ID:  ${fieldB.id}`);
-    console.log(`📡 Fixed IoT Node ID: ${node1.id}`);
-    console.log(`📱 Portable Node ID:  ${portableReader.id}`);
+    console.log(`🍅 Tomato Field ID:      ${fieldA.id}`);
+    console.log(`🌶️ Chilli Field ID:      ${fieldB.id}`);
+    console.log(`🏛️ Central Hub ID:       ${hub.id}`);
+    console.log(`📡 Fixed Node Alpha ID:  ${node1.id}`);
+    console.log(`📡 Fixed Node Beta ID:   ${node2.id}`);
+    console.log(`📱 Portable Node ID:     ${portableReader.id}`);
     console.log('======================================================\n');
     await app.close();
 }

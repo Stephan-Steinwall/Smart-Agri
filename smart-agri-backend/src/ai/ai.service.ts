@@ -5,7 +5,6 @@ import { Repository } from 'typeorm';
 import OpenAI from 'openai';
 import { TelemetryService } from '../telemetry/telemetry.service';
 import { Field } from '../farms/entities/field.entity';
-import { DeviceType, OperatingMode } from '../devices/entities/device.entity';
 
 @Injectable()
 export class AiService {
@@ -27,7 +26,7 @@ export class AiService {
         const latestReading = await this.telemetryService.getLatestReading(deviceId);
 
         if (!latestReading) {
-            return "I'm sorry, but I cannot access the sensor data for this field right now.";
+            return { answer: "I'm sorry, but I cannot access the sensor data for this field right now. Please ensure the sensor node is online and transmitting." };
         }
 
         // 2. Build the System Prompt
@@ -66,27 +65,23 @@ export class AiService {
     }
 
     async generateFieldInsight(fieldId: string) {
-        // 1. Fetch Field and Crop Profile
+        // 1. Fetch Field + Crop Profile (no longer need to load devices here)
         const field = await this.fieldRepo.findOne({
             where: { id: fieldId },
-            relations: { cropProfile: true, devices: true }, // Bring the crop profile and devices!
+            relations: { cropProfile: true },
         });
 
         if (!field || !field.cropProfile) {
             return { error: "Field or Crop Profile not found." };
         }
 
-        // 2. Find the fixed node in this field to get readings
-        const fixedNode = field.devices.find(
-            d => d.operatingMode === OperatingMode.FIXED && d.deviceType === DeviceType.NODE
-        );
-        if (!fixedNode) return { error: "No fixed sensor node found in this field." };
-
-        // 3. Get the latest reading
-        const reading = await this.telemetryService.getLatestReading(fixedNode.id);
+        // 2. Get the latest reading via the TelemetryService helper.
+        //    This resolves the correct FIXED NODE at the DB level, avoiding
+        //    the previous bug where in-memory device array walk could fail.
+        const reading = await this.telemetryService.getLatestReadingByField(fieldId);
         if (!reading) return { error: 'No sensor readings found for this field.' };
 
-        // 4. Force OpenAI to return structured JSON
+        // 3. Force OpenAI to return structured JSON
         const systemPrompt = `
       You are an expert AI Agronomist monitoring a field of ${field.cropProfile.name}.
       

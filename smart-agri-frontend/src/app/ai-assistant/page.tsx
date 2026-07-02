@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { Bot, Send, User, WifiOff, Loader2, Sprout, BrainCircuit } from 'lucide-react';
+import { Bot, Send, User, WifiOff, Loader2, Sprout, BrainCircuit, MapPin } from 'lucide-react';
+import { useFarmStore } from '@/store/useFarmStore';
 
 const API_BASE = 'http://localhost:3001/api/v1';
 
@@ -20,17 +21,61 @@ function ThinkingDots() {
   );
 }
 
+// ── AI message renderer — preserves newlines, bullets & bold ─────────────
+function AiMessageContent({ content }: { content: string }) {
+  const lines = content.split('\n');
+  return (
+    <div className="text-sm leading-relaxed space-y-1">
+      {lines.map((line, i) => {
+        if (line.trim() === '') return <br key={i} />;
+
+        // Bullet / list items
+        const isBullet = /^[\-\*•]\s/.test(line.trim());
+        const isNumbered = /^\d+[\.\)]\s/.test(line.trim());
+        if (isBullet || isNumbered) {
+          return (
+            <div key={i} className="flex gap-2 items-start">
+              <span
+                className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-current opacity-50"
+                style={{ marginTop: '7px' }}
+              />
+              <span>{line.replace(/^[\-\*•]\s|^\d+[\.\)]\s/, '')}</span>
+            </div>
+          );
+        }
+
+        // Inline **bold** support
+        const parts = line.split(/(\*\*[^*]+\*\*)/g);
+        return (
+          <p key={i}>
+            {parts.map((part, j) =>
+              part.startsWith('**') && part.endsWith('**')
+                ? <strong key={j}>{part.slice(2, -2)}</strong>
+                : part
+            )}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 export default function AiAssistant() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'ai',
-      content: "Hello! I'm your SmartAgri AI Agronomist. I'm connected to your field sensors right now. Ask me about soil health, NPK levels, irrigation schedules, or crop recommendations.",
+      content:
+        "Hello! I'm your SmartAgri AI Agronomist. I'm connected to your field sensors right now. Ask me about soil health, NPK levels, irrigation schedules, or crop recommendations.",
       ts: new Date(),
     },
   ]);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Use the globally-selected field from the store
+  const { activeFieldId, activeFieldName } = useFarmStore();
 
   const { data: devices, isLoading: devicesLoading, isError: devicesError } = useQuery({
     queryKey: ['sensor-nodes'],
@@ -42,7 +87,9 @@ export default function AiAssistant() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const deviceId = devices?.[0]?.id ?? null;
+  // Resolve the sensor node that belongs to the active field (not just [0])
+  const deviceId: string | null =
+    devices?.find((d: any) => d.field?.id === activeFieldId)?.id ?? null;
 
   // Auto-scroll on new message
   useEffect(() => {
@@ -62,16 +109,17 @@ export default function AiAssistant() {
         query: userMsg.content,
         deviceId,
       });
+      // res.data is always { answer: string }
       setMessages((prev) => [
         ...prev,
-        { role: 'ai', content: res.data.answer, ts: new Date() },
+        { role: 'ai', content: res.data.answer ?? 'No response received.', ts: new Date() },
       ]);
     } catch {
       setMessages((prev) => [
         ...prev,
         {
           role: 'ai',
-          content: 'Sorry, I\'m having trouble reaching the sensor network right now. Please try again.',
+          content: "Sorry, I'm having trouble reaching the sensor network right now. Please try again.",
           ts: new Date(),
         },
       ]);
@@ -92,21 +140,29 @@ export default function AiAssistant() {
             <Loader2 className="w-7 h-7 animate-spin" style={{ color: 'var(--primary)' }} />
           </div>
           <div>
-            <p className="font-semibold" style={{ color: 'var(--foreground)' }}>Connecting to sensor network</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>Establishing secure link...</p>
+            <p className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              Connecting to sensor network
+            </p>
+            <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
+              Establishing secure link...
+            </p>
           </div>
         </div>
       </div>
     );
   }
 
-  // ── Error state ──────────────────────────────────────────────────────────
-  if (devicesError || !deviceId) {
+  // ── Backend unreachable ───────────────────────────────────────────────────
+  if (devicesError) {
     return (
       <div className="flex items-center justify-center h-full">
         <div
           className="max-w-md w-full rounded-2xl p-8 text-center"
-          style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}
+          style={{
+            background: 'var(--card)',
+            boxShadow: 'var(--shadow-card)',
+            border: '1px solid var(--border)',
+          }}
         >
           <div
             className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
@@ -114,7 +170,9 @@ export default function AiAssistant() {
           >
             <WifiOff className="w-7 h-7" style={{ color: 'hsl(4, 80%, 52%)' }} />
           </div>
-          <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--foreground)' }}>Cannot Reach Sensor Network</h2>
+          <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--foreground)' }}>
+            Cannot Reach Sensor Network
+          </h2>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
             Ensure the backend is running on{' '}
             <code
@@ -124,6 +182,37 @@ export default function AiAssistant() {
               http://localhost:3001
             </code>{' '}
             and the database has been seeded with sensor data.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── No device for the selected field ─────────────────────────────────────
+  if (!deviceId) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div
+          className="max-w-md w-full rounded-2xl p-8 text-center"
+          style={{
+            background: 'var(--card)',
+            boxShadow: 'var(--shadow-card)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <div
+            className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+            style={{ background: 'hsl(142, 40%, 94%)' }}
+          >
+            <MapPin className="w-7 h-7" style={{ color: 'var(--primary)' }} />
+          </div>
+          <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--foreground)' }}>
+            {activeFieldId ? 'No Sensor Node in This Field' : 'Select a Field First'}
+          </h2>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+            {activeFieldId
+              ? `"${activeFieldName}" has no fixed sensor node assigned. Assign a NODE device to this field in Device Config.`
+              : 'Use the field selector in the top bar to choose a field before starting a chat.'}
           </p>
         </div>
       </div>
@@ -152,7 +241,9 @@ export default function AiAssistant() {
             <p className="font-bold text-white text-sm">AI Agronomist</p>
             <div className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse" />
-              <span className="text-[11px] text-green-200">Connected to field sensors</span>
+              <span className="text-[11px] text-green-200">
+                {activeFieldName ? `Monitoring: ${activeFieldName}` : 'Connected to field sensors'}
+              </span>
             </div>
           </div>
         </div>
@@ -200,7 +291,7 @@ export default function AiAssistant() {
                 {/* Bubble */}
                 <div>
                   <div
-                    className="px-4 py-3 rounded-2xl text-sm leading-relaxed"
+                    className="px-4 py-3"
                     style={{
                       background: isAi ? 'hsl(142, 30%, 96%)' : 'hsl(210, 68%, 48%)',
                       color: isAi ? 'var(--foreground)' : 'white',
@@ -208,7 +299,11 @@ export default function AiAssistant() {
                       border: isAi ? '1px solid hsl(142, 30%, 88%)' : 'none',
                     }}
                   >
-                    {msg.content}
+                    {/* AI messages get rich rendering; user messages are plain */}
+                    {isAi
+                      ? <AiMessageContent content={msg.content} />
+                      : <p className="text-sm leading-relaxed">{msg.content}</p>
+                    }
                   </div>
                   <p
                     className={`text-[10px] mt-1 ${isAi ? 'text-left' : 'text-right'}`}
@@ -233,7 +328,6 @@ export default function AiAssistant() {
                 <Bot className="w-4 h-4 text-white" />
               </div>
               <div
-                className="rounded-2xl"
                 style={{
                   background: 'hsl(142, 30%, 96%)',
                   border: '1px solid hsl(142, 30%, 88%)',
@@ -264,7 +358,7 @@ export default function AiAssistant() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-          placeholder="Ask about soil health, NPK levels, irrigation..."
+          placeholder={`Ask about ${activeFieldName || 'your field'}...`}
           disabled={isLoading}
           className="flex-1 text-sm px-4 py-3 rounded-xl focus:outline-none transition-colors"
           style={{
@@ -272,11 +366,11 @@ export default function AiAssistant() {
             border: '1.5px solid transparent',
             color: 'var(--foreground)',
           }}
-          onFocus={e => {
+          onFocus={(e) => {
             (e.target as HTMLInputElement).style.borderColor = 'hsl(142, 65%, 70%)';
             (e.target as HTMLInputElement).style.background = 'var(--card)';
           }}
-          onBlur={e => {
+          onBlur={(e) => {
             (e.target as HTMLInputElement).style.borderColor = 'transparent';
             (e.target as HTMLInputElement).style.background = 'var(--muted)';
           }}
@@ -286,9 +380,10 @@ export default function AiAssistant() {
           disabled={isLoading || !input.trim()}
           className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-150 focus:outline-none"
           style={{
-            background: isLoading || !input.trim()
-              ? 'var(--muted)'
-              : 'linear-gradient(135deg, hsl(142, 58%, 28%), hsl(162, 50%, 35%))',
+            background:
+              isLoading || !input.trim()
+                ? 'var(--muted)'
+                : 'linear-gradient(135deg, hsl(142, 58%, 28%), hsl(162, 50%, 35%))',
             color: isLoading || !input.trim() ? 'var(--muted-foreground)' : 'white',
             cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
           }}

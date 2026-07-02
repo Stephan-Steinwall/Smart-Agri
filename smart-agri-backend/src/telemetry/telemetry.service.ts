@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { SensorReading } from './entities/sensor-reading.entity';
-import { Device, OperatingMode } from '../devices/entities/device.entity'; // Import Device
+import { Device, DeviceType, OperatingMode } from '../devices/entities/device.entity';
 
 @Injectable()
 export class TelemetryService {
@@ -30,13 +30,47 @@ export class TelemetryService {
         return data.reverse(); // Reverse so the chart goes left-to-right (old to new)
     }
 
+    /**
+     * Resolves the fixed sensor NODE for a field, then returns its history.
+     * Filters on BOTH deviceType=NODE and operatingMode=FIXED to avoid
+     * accidentally matching a HUB (which never produces sensor readings).
+     */
     async getHistoryByField(fieldId: string) {
         const device = await this.dataSource.getRepository(Device).findOne({
-            where: { field: { id: fieldId }, operatingMode: OperatingMode.FIXED }
+            where: {
+                field: { id: fieldId },
+                deviceType: DeviceType.NODE,
+                operatingMode: OperatingMode.FIXED,
+            },
         });
 
-        if (!device) return []; // If no sensor (like the Chillies!), return empty array
+        if (!device) {
+            console.warn(`[TelemetryService] No fixed NODE found for field ${fieldId}`);
+            return [];
+        }
 
+        console.log(`[TelemetryService] Resolved device ${device.id} (${device.alias ?? device.macAddress}) for field ${fieldId}`);
         return this.getHistoricalData(device.id);
+    }
+
+    /**
+     * Convenience helper used by AiService: resolves the fixed sensor NODE
+     * for a field and returns its single latest reading.
+     */
+    async getLatestReadingByField(fieldId: string) {
+        const device = await this.dataSource.getRepository(Device).findOne({
+            where: {
+                field: { id: fieldId },
+                deviceType: DeviceType.NODE,
+                operatingMode: OperatingMode.FIXED,
+            },
+        });
+
+        if (!device) {
+            console.warn(`[TelemetryService] No fixed NODE found for field ${fieldId}`);
+            return null;
+        }
+
+        return this.getLatestReading(device.id);
     }
 }

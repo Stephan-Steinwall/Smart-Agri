@@ -20,6 +20,9 @@ export class Device {
     @Column({ unique: true })
     macAddress: string;
 
+    @Column({ nullable: true })
+    alias: string; // Human-readable name, e.g. "Sensor Node Alpha"
+
     @Column({ type: 'enum', enum: DeviceType })
     deviceType: DeviceType;
 
@@ -32,12 +35,19 @@ export class Device {
     @Column({ type: 'enum', enum: OperatingMode, default: OperatingMode.FIXED })
     operatingMode: OperatingMode;
 
+    @Column({ type: 'float', nullable: true })
+    loraSignalStrength: number; // dBm, e.g. -75
+
+    @Column({ type: 'float', nullable: true })
+    latitude: number; // GPS latitude for map pins
+
+    @Column({ type: 'float', nullable: true })
+    longitude: number; // GPS longitude for map pins
+
     @UpdateDateColumn()
     lastSeen: Date;
 
     // Many Devices belong to One Field
-    @ManyToOne(() => Field, (field) => field.devices, { onDelete: 'SET NULL' })
+    @ManyToOne(() => Field, (field) => field.devices, { onDelete: 'SET NULL', nullable: true })
     field: Field | null;
-
-
 }
