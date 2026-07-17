@@ -14,4 +14,14 @@ export class AiController {
     async getInsight(@Param('deviceId') deviceId: string) {
         return this.aiService.generateFieldInsight(deviceId);
     }
+
+    @Get('sessions')
+    async getSessions() {
+        return this.aiService.getChatSessions();
+    }
+
+    @Get('history/:sessionId')
+    async getHistory(@Param('sessionId') sessionId: string) {
+        return this.aiService.getChatHistory(sessionId);
+    }
 }

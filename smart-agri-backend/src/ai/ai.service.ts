@@ -143,4 +143,64 @@ export class AiService {
             return { error: 'Failed to parse AI response.' };
         }
     }
+
+    async getChatSessions() {
+        // Query distinct session IDs. In Supabase/PostgreSQL, we can get unique sessions 
+        // by grouping or just grabbing everything and doing it in JS if it's small, 
+        // but grouping is better.
+        // Wait, standard postgrest doesn't easily support DISTINCT or GROUP BY without RPC.
+        // Workaround: fetch all history ordered by created_at desc, and filter unique in JS.
+        const { data, error } = await this.supabaseService.getClient()
+            .from('ai_chat_history')
+            .select('session_id, role, content, created_at')
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            this.logger.error(`Error fetching sessions: ${error.message}`);
+            return [];
+        }
+
+        // Group by session_id to find the latest message and generate a title
+        const sessionMap = new Map<string, any>();
+
+        for (const row of data) {
+            if (!sessionMap.has(row.session_id)) {
+                // If the very last message in a session was by user, use that as title.
+                // Otherwise we just say "Chat Session"
+                let title = 'Chat Session';
+                if (row.role === 'user') {
+                     title = row.content.length > 40 ? row.content.substring(0, 40) + '...' : row.content;
+                }
+                
+                sessionMap.set(row.session_id, {
+                    sessionId: row.session_id,
+                    lastMessageAt: row.created_at,
+                    title: title,
+                });
+            } else {
+                 // Update title if we find a user message and current title is generic
+                 const current = sessionMap.get(row.session_id);
+                 if (current.title === 'Chat Session' && row.role === 'user') {
+                     current.title = row.content.length > 40 ? row.content.substring(0, 40) + '...' : row.content;
+                 }
+            }
+        }
+
+        return Array.from(sessionMap.values());
+    }
+
+    async getChatHistory(sessionId: string) {
+        const { data, error } = await this.supabaseService.getClient()
+            .from('ai_chat_history')
+            .select('*')
+            .eq('session_id', sessionId)
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            this.logger.error(`Error fetching history for session ${sessionId}: ${error.message}`);
+            return [];
+        }
+
+        return data;
+    }
 }
