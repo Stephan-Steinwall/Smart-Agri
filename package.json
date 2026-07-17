@@ -1,0 +1,24 @@
+{
+  "name": "arith-agriculture",
+  "version": "1.0.0",
+  "description": "��#\u0000 \u0000S\u0000m\u0000a\u0000r\u0000t\u0000-\u0000A\u0000g\u0000r\u0000i\u0000\r\u0000 \u0000",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"npm run start:dev --prefix smart-agri-backend\" \"npm run dev --prefix smart-agri-frontend\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Stephan-Steinwall/Smart-Agri.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Stephan-Steinwall/Smart-Agri/issues"
+  },
+  "homepage": "https://github.com/Stephan-Steinwall/Smart-Agri#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  }
+}
