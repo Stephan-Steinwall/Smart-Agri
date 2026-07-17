@@ -80,11 +80,11 @@ function getRiskConfig(riskLevel: string) {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────
-export default function AiInsightCard({ fieldId, fieldName }: { fieldId: string; fieldName: string }) {
+export default function AiInsightCard({ deviceId, fieldName }: { deviceId: string; fieldName: string }) {
   const { data: insight, isLoading, isError } = useQuery({
-    queryKey: ['ai-insight', fieldId],
+    queryKey: ['ai-insight', deviceId],
     queryFn: async () => {
-      const res = await axios.get(`http://localhost:3001/api/v1/ai/insight/${fieldId}`);
+      const res = await axios.get(`http://localhost:3001/api/v1/ai/insight/${deviceId}`);
       return res.data;
     },
     refetchInterval: 300_000,

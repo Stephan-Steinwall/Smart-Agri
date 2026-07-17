@@ -1,8 +1,8 @@
+// src/app/page.tsx
 "use client";
 
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { useFarmStore } from '@/store/useFarmStore';
 import AiInsightCard from '@/components/AiInsightCard';
 import {
   Activity, Droplets, Thermometer, Sprout,
@@ -14,11 +14,8 @@ import {
 } from 'recharts';
 
 const API_BASE = 'http://localhost:3001/api/v1';
-
-interface SensorNode {
-  id: string;
-  field: { id: string; name: string } | null;
-}
+const DEVICE_ID = 'agribot_receiver_01';
+const DEVICE_NAME = 'Main Field Node';
 
 // ── Stat mini-card ─────────────────────────────────────────────────────────
 function StatCard({
@@ -76,37 +73,13 @@ function CustomTooltip({ active, payload, label }: any) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { activeFieldId, activeFieldName } = useFarmStore();
-
-  // Fetch all fields via sensor-nodes
-  const { data: sensorNodes } = useQuery<SensorNode[]>({
-    queryKey: ['sensor-nodes'],
-    queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/devices/sensor-nodes`);
-      return res.data;
-    },
-    staleTime: 60_000,
-  });
-
-  // Deduplicate to one card per unique field
-  const fields = sensorNodes
-    ? Array.from(
-        new Map(
-          sensorNodes
-            .filter((n) => n.field !== null)
-            .map((n) => [n.field!.id, n.field!])
-        ).values()
-      )
-    : [];
-
-  // Telemetry chart for selected field
+  // Telemetry chart for the specific device
   const { data: chartData, isLoading: chartLoading } = useQuery({
-    queryKey: ['fieldTelemetry', activeFieldId],
+    queryKey: ['fieldTelemetry', DEVICE_ID],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/field-history/${activeFieldId}`);
+      const res = await axios.get(`${API_BASE}/telemetry/history/${DEVICE_ID}`);
       return res.data;
     },
-    enabled: !!activeFieldId,
   });
 
   // Latest readings for stat cards
@@ -143,8 +116,8 @@ export default function Dashboard() {
             </div>
             <h2 className="text-2xl md:text-3xl font-bold">Farm Overview</h2>
             <p className="text-sm opacity-70 mt-1">
-              AI-driven insights and health metrics across{' '}
-              <span className="font-semibold opacity-90">{fields.length} field{fields.length !== 1 ? 's' : ''}</span>
+              AI-driven insights and health metrics for{' '}
+              <span className="font-semibold opacity-90">{DEVICE_NAME}</span>
             </p>
           </div>
 
@@ -184,15 +157,15 @@ export default function Dashboard() {
           />
           <StatCard
             icon={Sprout}
-            label="Fields Active"
-            value={fields.length}
+            label="Devices Active"
+            value="1"
             color="hsl(142, 65%, 30%)"
             bgColor="hsl(142, 65%, 94%)"
           />
           <StatCard
             icon={BrainCircuit}
             label="AI Analyses"
-            value={fields.length}
+            value="1"
             unit=" today"
             color="hsl(280, 60%, 52%)"
             bgColor="hsl(280, 60%, 95%)"
@@ -219,24 +192,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {fields.length === 0 ? (
-          <div
-            className="rounded-2xl p-12 text-center"
-            style={{ background: 'var(--card)', border: '1px dashed var(--border)', boxShadow: 'var(--shadow-card)' }}
-          >
-            <Sprout className="w-10 h-10 mx-auto mb-3 opacity-25" style={{ color: 'var(--primary)' }} />
-            <p className="font-semibold" style={{ color: 'var(--foreground)' }}>No fields with sensors found</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
-              Add sensor nodes to your fields to get AI-powered insights.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-            {fields.map((field) => (
-              <AiInsightCard key={field.id} fieldId={field.id} fieldName={field.name} />
-            ))}
-          </div>
-        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          <AiInsightCard deviceId={DEVICE_ID} fieldName={DEVICE_NAME} />
+        </div>
       </section>
 
       {/* ── Analytics Chart ──────────────────────────────────────────────── */}
@@ -251,11 +209,9 @@ export default function Dashboard() {
           <div>
             <h3 className="font-bold text-base" style={{ color: 'var(--foreground)' }}>
               Sensor Analytics
-              {activeFieldName && (
-                <span className="ml-2 text-sm font-normal" style={{ color: 'var(--muted-foreground)' }}>
-                  — {activeFieldName}
-                </span>
-              )}
+              <span className="ml-2 text-sm font-normal" style={{ color: 'var(--muted-foreground)' }}>
+                — {DEVICE_NAME}
+              </span>
             </h3>
             <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
               Real-time moisture and temperature from field sensors
@@ -285,7 +241,7 @@ export default function Dashboard() {
                   stroke="hsl(120, 14%, 92%)"
                 />
                 <XAxis
-                  dataKey="time"
+                  dataKey="timestamp"
                   tickFormatter={(t) =>
                     new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   }
@@ -344,9 +300,7 @@ export default function Dashboard() {
               <Activity className="w-10 h-10 opacity-15" style={{ color: 'var(--foreground)' }} />
               <p className="font-medium" style={{ color: 'var(--foreground)' }}>No sensor data yet</p>
               <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                {activeFieldId
-                  ? 'No sensor nodes are installed in this field yet.'
-                  : 'Select a field above to see its sensor analytics.'}
+                No sensor nodes are installed in this field yet.
               </p>
             </div>
           )}

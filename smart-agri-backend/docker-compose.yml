@@ -1,16 +1,3 @@
 services:
-  timescaledb:
-    image: timescale/timescaledb:latest-pg15
-    container_name: smart_agri_db
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: superuser
-      POSTGRES_DB: smart_agri_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - timescaledb_data:/var/lib/postgresql/data
-    restart: always
-
-volumes:
-  timescaledb_data:
+  # Supabase is now used for the database, so the local TimescaleDB container has been removed.
+  # Other services (like Redis) can be added here in the future if needed.

@@ -4,30 +4,18 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Sprout, LayoutDashboard, Settings, MapIcon, Bot,
-  Power, MapPin, Download, ChevronRight, Wifi
+  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
-import FieldSelector from './FieldSelector';
 
 const navItems = [
   { href: '/',               icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/map',            icon: MapIcon,          label: 'Field Map' },
   { href: '/ai-assistant',   icon: Bot,              label: 'AI Assistant' },
-  { href: '/automation',     icon: Power,            label: 'Automation' },
-  { href: '/portable',       icon: MapPin,           label: 'Portable Readings' },
-  { href: '/reports',        icon: Download,         label: 'Data Reports' },
-  { href: '/settings',       icon: Settings,         label: 'Device Config' },
 ];
 
 const pageTitles: Record<string, string> = {
   '/':             'Farm Overview',
-  '/map':          'Field Map',
   '/ai-assistant': 'AI Assistant',
-  '/automation':   'Automation Control',
-  '/portable':     'Portable Readings',
-  '/reports':      'Data Reports',
-  '/settings':     'Device Config',
 };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -165,8 +153,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {/* Right: Controls */}
           <div className="flex items-center gap-3">
-            <FieldSelector />
-            <div style={{ width: '1px', height: '24px', background: 'var(--border)' }} />
             <NotificationBell />
             {/* Avatar */}
             <div

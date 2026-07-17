@@ -1,76 +1,60 @@
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Injectable, Logger } from '@nestjs/common';
 import { SensorReading } from './entities/sensor-reading.entity';
-import { Device, DeviceType, OperatingMode } from '../devices/entities/device.entity';
+import { SupabaseService } from '../supabase/supabase.service';
 
 @Injectable()
 export class TelemetryService {
-    constructor(
-        @InjectRepository(SensorReading)
-        private telemetryRepo: Repository<SensorReading>,
-        private dataSource: DataSource,
-    ) { }
+    private readonly logger = new Logger(TelemetryService.name);
+
+    constructor(private readonly supabaseService: SupabaseService) {}
+
+    private mapSupabaseToEntity(row: any): SensorReading | null {
+        if (!row) return null;
+        return {
+            time: row.updated_at ? new Date(row.updated_at) : new Date(row.created_at),
+            deviceId: row.device_id,
+            nitrogen: row.nitrogen ?? null,
+            phosphorus: row.phosphorus ?? null,
+            potassium: row.potassium ?? null,
+            moisture: row.soil_moisture_percent ?? null,
+            temperature: row.soil_temperature_celsius ?? null,
+            ph: row.soil_ph ?? null,
+            electricalConductivity: row.ec_levels ?? null,
+            batteryLevel: row.battery_voltage ?? null,
+        };
+    }
 
     // Get the absolute newest reading for our Live Cards
-    async getLatestReading(deviceId: string) {
-        return this.telemetryRepo.findOne({
-            where: { deviceId },
-            order: { time: 'DESC' },
-        });
+    async getLatestReading(deviceId: string): Promise<SensorReading | null> {
+        const { data, error } = await this.supabaseService.getClient()
+            .from('latest_soil_reading')
+            .select('*')
+            .eq('device_id', deviceId)
+            .single();
+
+        if (error) {
+            this.logger.error(`Error fetching latest reading for ${deviceId}: ${error.message}`);
+            return null;
+        }
+        
+        return this.mapSupabaseToEntity(data);
     }
 
     // Get historical data for the charts (e.g., last 50 readings)
-    async getHistoricalData(deviceId: string) {
-        const data = await this.telemetryRepo.find({
-            where: { deviceId },
-            order: { time: 'DESC' },
-            take: 50, // Get last 50 data points
-        });
-        return data.reverse(); // Reverse so the chart goes left-to-right (old to new)
-    }
+    async getHistoricalData(deviceId: string): Promise<SensorReading[]> {
+        const { data, error } = await this.supabaseService.getClient()
+            .from('soil_readings')
+            .select('*')
+            .eq('device_id', deviceId)
+            .order('created_at', { ascending: false })
+            .limit(50);
 
-    /**
-     * Resolves the fixed sensor NODE for a field, then returns its history.
-     * Filters on BOTH deviceType=NODE and operatingMode=FIXED to avoid
-     * accidentally matching a HUB (which never produces sensor readings).
-     */
-    async getHistoryByField(fieldId: string) {
-        const device = await this.dataSource.getRepository(Device).findOne({
-            where: {
-                field: { id: fieldId },
-                deviceType: DeviceType.NODE,
-                operatingMode: OperatingMode.FIXED,
-            },
-        });
-
-        if (!device) {
-            console.warn(`[TelemetryService] No fixed NODE found for field ${fieldId}`);
+        if (error) {
+            this.logger.error(`Error fetching history for ${deviceId}: ${error.message}`);
             return [];
         }
 
-        console.log(`[TelemetryService] Resolved device ${device.id} (${device.alias ?? device.macAddress}) for field ${fieldId}`);
-        return this.getHistoricalData(device.id);
+        // Reverse so the chart goes left-to-right (old to new)
+        return (data.map((row) => this.mapSupabaseToEntity(row)).filter(Boolean) as SensorReading[]).reverse(); 
     }
-
-    /**
-     * Convenience helper used by AiService: resolves the fixed sensor NODE
-     * for a field and returns its single latest reading.
-     */
-    async getLatestReadingByField(fieldId: string) {
-        const device = await this.dataSource.getRepository(Device).findOne({
-            where: {
-                field: { id: fieldId },
-                deviceType: DeviceType.NODE,
-                operatingMode: OperatingMode.FIXED,
-            },
-        });
-
-        if (!device) {
-            console.warn(`[TelemetryService] No fixed NODE found for field ${fieldId}`);
-            return null;
-        }
-
-        return this.getLatestReading(device.id);
-    }
-}
+}

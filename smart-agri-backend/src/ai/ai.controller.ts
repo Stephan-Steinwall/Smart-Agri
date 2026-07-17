@@ -6,12 +6,12 @@ export class AiController {
     constructor(private readonly aiService: AiService) { }
 
     @Post('chat')
-    async chat(@Body() body: { query: string; deviceId: string }) {
-        return this.aiService.askAgronomist(body.query, body.deviceId);
+    async chat(@Body() body: { query: string; deviceId: string; sessionId: string }) {
+        return this.aiService.askAgronomist(body.query, body.deviceId, body.sessionId);
     }
 
-    @Get('insight/:fieldId')
-    async getInsight(@Param('fieldId') fieldId: string) {
-        return this.aiService.generateFieldInsight(fieldId);
+    @Get('insight/:deviceId')
+    async getInsight(@Param('deviceId') deviceId: string) {
+        return this.aiService.generateFieldInsight(deviceId);
     }
 }

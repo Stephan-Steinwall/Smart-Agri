@@ -1,38 +1,47 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import OpenAI from 'openai';
 import { TelemetryService } from '../telemetry/telemetry.service';
-import { Field } from '../farms/entities/field.entity';
+import { SupabaseService } from '../supabase/supabase.service';
 
 @Injectable()
 export class AiService {
     private openai: OpenAI;
+    private readonly logger = new Logger(AiService.name);
 
     constructor(
         private configService: ConfigService,
         private telemetryService: TelemetryService,
-        @InjectRepository(Field)
-        private fieldRepo: Repository<Field>,
+        private supabaseService: SupabaseService,
     ) {
         this.openai = new OpenAI({
             apiKey: this.configService.get<string>('OPENAI_API_KEY'),
         });
     }
 
-    async askAgronomist(query: string, deviceId: string) {
+    async askAgronomist(query: string, deviceId: string, sessionId: string) {
         // 1. Fetch Context (Current state of the farm)
         const latestReading = await this.telemetryService.getLatestReading(deviceId);
 
         if (!latestReading) {
-            return { answer: "I'm sorry, but I cannot access the sensor data for this field right now. Please ensure the sensor node is online and transmitting." };
+            return { answer: "I'm sorry, but I cannot access the sensor data for this device right now. Please ensure the sensor node is online and transmitting." };
         }
 
-        // 2. Build the System Prompt
+        // 2. Fetch Chat History from Supabase
+        const { data: chatHistory, error: historyError } = await this.supabaseService.getClient()
+            .from('ai_chat_history')
+            .select('*')
+            .eq('session_id', sessionId)
+            .order('created_at', { ascending: true });
+
+        if (historyError) {
+            this.logger.error(`Failed to fetch chat history: ${historyError.message}`);
+        }
+
+        // 3. Build the System Prompt (RAG Context)
         const systemPrompt = `
       You are an expert Agronomy AI Assistant managing a Smart Agriculture Platform.
-      You provide concise, professional, and actionable advice to farmers.
+      You provide concise, professional, and actionable advice to farmers based on raw data.
       
       CURRENT SENSOR DATA CONTEXT:
       - Time of reading: ${latestReading.time}
@@ -46,60 +55,68 @@ export class AiService {
       INSTRUCTIONS:
       Answer the user's question directly based on the data above. Do not hallucinate data. 
       If moisture is below 30%, recommend immediate irrigation. 
-      Keep responses under 4 sentences unless specifically asked for a detailed report.
+      Keep responses concise and actionable.
     `;
 
-        // 3. Call OpenAI
+        // Format history for OpenAI
+        const messages: any[] = [{ role: 'system', content: systemPrompt }];
+        
+        if (chatHistory) {
+            for (const msg of chatHistory) {
+                if (msg.role === 'user' || msg.role === 'assistant') {
+                    messages.push({ role: msg.role, content: msg.content });
+                }
+            }
+        }
+        
+        // Add the new user query
+        messages.push({ role: 'user', content: query });
+
+        // 4. Call OpenAI
         const response = await this.openai.chat.completions.create({
-            model: 'gpt-3.5-turbo', // You can use gpt-4o if you have access
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: query },
-            ],
+            model: 'gpt-3.5-turbo',
+            messages: messages,
             temperature: 0.2, // Low temperature for factual, analytical responses
         });
 
-        return {
-            answer: response.choices[0].message.content,
-        };
-    }
+        const answer = response.choices[0].message.content;
 
-    async generateFieldInsight(fieldId: string) {
-        // 1. Fetch Field + Crop Profile (no longer need to load devices here)
-        const field = await this.fieldRepo.findOne({
-            where: { id: fieldId },
-            relations: { cropProfile: true },
-        });
+        // 5. Save the new messages to Chat History
+        if (answer) {
+            const { error: insertError } = await this.supabaseService.getClient()
+                .from('ai_chat_history')
+                .insert([
+                    { session_id: sessionId, role: 'user', content: query },
+                    { session_id: sessionId, role: 'assistant', content: answer }
+                ]);
 
-        if (!field || !field.cropProfile) {
-            return { error: "Field or Crop Profile not found." };
+            if (insertError) {
+                this.logger.error(`Failed to save chat history: ${insertError.message}`);
+            }
         }
 
-        // 2. Get the latest reading via the TelemetryService helper.
-        //    This resolves the correct FIXED NODE at the DB level, avoiding
-        //    the previous bug where in-memory device array walk could fail.
-        const reading = await this.telemetryService.getLatestReadingByField(fieldId);
-        if (!reading) return { error: 'No sensor readings found for this field.' };
+        return { answer };
+    }
 
-        // 3. Force OpenAI to return structured JSON
+    // A simpler status generator based purely on sensor data without CropProfiles
+    async generateFieldInsight(deviceId: string) {
+        const reading = await this.telemetryService.getLatestReading(deviceId);
+        
+        if (!reading) {
+             return { error: 'No sensor readings found for this device.' };
+        }
+
         const systemPrompt = `
-      You are an expert AI Agronomist monitoring a field of ${field.cropProfile.name}.
-      
-      IDEAL CONDITIONS FOR ${field.cropProfile.name.toUpperCase()}:
-      - Min Moisture: ${field.cropProfile.minMoisturePercent}%
-      - Min Nitrogen: ${field.cropProfile.minNitrogen} ppm
-      - Min Phosphorus: ${field.cropProfile.minPhosphorus} ppm
-      - Min Potassium: ${field.cropProfile.minPotassium} ppm
-      - Ideal pH: ${field.cropProfile.idealPhLevel}
+      You are an expert AI Agronomist monitoring a generic crop field.
       
       CURRENT LIVE READINGS:
-      - Moisture: ${reading.moisture}%
-      - Nitrogen: ${reading.nitrogen} ppm
-      - Phosphorus: ${reading.phosphorus} ppm
-      - Potassium: ${reading.potassium} ppm
-      - pH: ${reading.ph}
+      - Moisture: ${reading.moisture}% (Target: > 40%)
+      - Nitrogen: ${reading.nitrogen} ppm (Target: > 40 ppm)
+      - Phosphorus: ${reading.phosphorus} ppm (Target: > 20 ppm)
+      - Potassium: ${reading.potassium} ppm (Target: > 30 ppm)
+      - pH: ${reading.ph} (Target: ~6.0 - 6.5)
 
-      Analyze the current readings against the ideal conditions. 
+      Analyze the current readings against general ideal conditions. 
       Respond ONLY with a valid JSON object matching this exact structure:
       {
         "healthScore": number (0-100),
@@ -114,12 +131,16 @@ export class AiService {
             model: 'gpt-3.5-turbo',
             messages: [{ role: 'system', content: systemPrompt }],
             temperature: 0.1,
-            response_format: { type: "json_object" } // This guarantees perfect JSON output
+            response_format: { type: "json_object" } 
         });
 
-        // Parse the JSON string from OpenAI into a real Javascript object
         const content = response.choices[0].message.content;
         if (!content) return { error: 'AI returned an empty response.' };
-        return JSON.parse(content);
+        
+        try {
+            return JSON.parse(content);
+        } catch (e) {
+            return { error: 'Failed to parse AI response.' };
+        }
     }
 }

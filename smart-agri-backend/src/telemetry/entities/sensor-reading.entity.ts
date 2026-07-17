@@ -1,40 +1,18 @@
-import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
-
-@Entity('sensor_readings')
-// We index by device_id and time (descending) for lightning-fast dashboard queries
-@Index(['deviceId', 'time'])
-export class SensorReading {
-
-    @PrimaryColumn({ type: 'timestamptz' })
+export interface SensorReading {
     time: Date;
-
-    @PrimaryColumn({ type: 'uuid' })
     deviceId: string;
 
     // NPK Values
-    @Column({ type: 'float', nullable: true })
-    nitrogen: number;
-
-    @Column({ type: 'float', nullable: true })
-    phosphorus: number;
-
-    @Column({ type: 'float', nullable: true })
-    potassium: number;
+    nitrogen: number | null;
+    phosphorus: number | null;
+    potassium: number | null;
 
     // Soil Conditions
-    @Column({ type: 'float', nullable: true })
-    moisture: number;
-
-    @Column({ type: 'float', nullable: true })
-    temperature: number;
-
-    @Column({ type: 'float', nullable: true })
-    ph: number;
+    moisture: number | null;
+    temperature: number | null;
+    ph: number | null;
 
     // Electrical Data
-    @Column({ type: 'float', nullable: true })
-    electricalConductivity: number;
-
-    @Column({ type: 'float', nullable: true })
-    batteryLevel: number;
-}
+    electricalConductivity: number | null;
+    batteryLevel: number | null;
+}

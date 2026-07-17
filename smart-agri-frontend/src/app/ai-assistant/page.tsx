@@ -1,12 +1,14 @@
+// src/app/ai-assistant/page.tsx
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { Bot, Send, User, WifiOff, Loader2, Sprout, BrainCircuit, MapPin } from 'lucide-react';
-import { useFarmStore } from '@/store/useFarmStore';
+import { Bot, Send, User, Sprout, BrainCircuit } from 'lucide-react';
 
 const API_BASE = 'http://localhost:3001/api/v1';
+const DEVICE_ID = 'agribot_receiver_01';
+const SESSION_ID = 'farmer_session_123';
+const DEVICE_NAME = 'Main Field Node';
 
 type Message = { role: 'user' | 'ai'; content: string; ts: Date };
 
@@ -74,30 +76,13 @@ export default function AiAssistant() {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Use the globally-selected field from the store
-  const { activeFieldId, activeFieldName } = useFarmStore();
-
-  const { data: devices, isLoading: devicesLoading, isError: devicesError } = useQuery({
-    queryKey: ['sensor-nodes'],
-    queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/devices/sensor-nodes`);
-      return res.data;
-    },
-    retry: 2,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // Resolve the sensor node that belongs to the active field (not just [0])
-  const deviceId: string | null =
-    devices?.find((d: any) => d.field?.id === activeFieldId)?.id ?? null;
-
   // Auto-scroll on new message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
   const sendMessage = async () => {
-    if (!input.trim() || !deviceId || isLoading) return;
+    if (!input.trim() || isLoading) return;
 
     const userMsg: Message = { role: 'user', content: input, ts: new Date() };
     setMessages((prev) => [...prev, userMsg]);
@@ -107,7 +92,8 @@ export default function AiAssistant() {
     try {
       const res = await axios.post(`${API_BASE}/ai/chat`, {
         query: userMsg.content,
-        deviceId,
+        deviceId: DEVICE_ID,
+        sessionId: SESSION_ID,
       });
       // res.data is always { answer: string }
       setMessages((prev) => [
@@ -127,97 +113,6 @@ export default function AiAssistant() {
       setIsLoading(false);
     }
   };
-
-  // ── Loading state ────────────────────────────────────────────────────────
-  if (devicesLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center space-y-4">
-          <div
-            className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center"
-            style={{ background: 'hsl(142, 40%, 94%)' }}
-          >
-            <Loader2 className="w-7 h-7 animate-spin" style={{ color: 'var(--primary)' }} />
-          </div>
-          <div>
-            <p className="font-semibold" style={{ color: 'var(--foreground)' }}>
-              Connecting to sensor network
-            </p>
-            <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
-              Establishing secure link...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Backend unreachable ───────────────────────────────────────────────────
-  if (devicesError) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div
-          className="max-w-md w-full rounded-2xl p-8 text-center"
-          style={{
-            background: 'var(--card)',
-            boxShadow: 'var(--shadow-card)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div
-            className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
-            style={{ background: 'hsl(4, 80%, 96%)' }}
-          >
-            <WifiOff className="w-7 h-7" style={{ color: 'hsl(4, 80%, 52%)' }} />
-          </div>
-          <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--foreground)' }}>
-            Cannot Reach Sensor Network
-          </h2>
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
-            Ensure the backend is running on{' '}
-            <code
-              className="px-1.5 py-0.5 rounded-md text-xs"
-              style={{ background: 'var(--muted)', color: 'var(--foreground)' }}
-            >
-              http://localhost:3001
-            </code>{' '}
-            and the database has been seeded with sensor data.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ── No device for the selected field ─────────────────────────────────────
-  if (!deviceId) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div
-          className="max-w-md w-full rounded-2xl p-8 text-center"
-          style={{
-            background: 'var(--card)',
-            boxShadow: 'var(--shadow-card)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div
-            className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
-            style={{ background: 'hsl(142, 40%, 94%)' }}
-          >
-            <MapPin className="w-7 h-7" style={{ color: 'var(--primary)' }} />
-          </div>
-          <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--foreground)' }}>
-            {activeFieldId ? 'No Sensor Node in This Field' : 'Select a Field First'}
-          </h2>
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
-            {activeFieldId
-              ? `"${activeFieldName}" has no fixed sensor node assigned. Assign a NODE device to this field in Device Config.`
-              : 'Use the field selector in the top bar to choose a field before starting a chat.'}
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   // ── Main chat UI ─────────────────────────────────────────────────────────
   return (
@@ -242,7 +137,7 @@ export default function AiAssistant() {
             <div className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse" />
               <span className="text-[11px] text-green-200">
-                {activeFieldName ? `Monitoring: ${activeFieldName}` : 'Connected to field sensors'}
+                Monitoring: {DEVICE_NAME}
               </span>
             </div>
           </div>
@@ -358,7 +253,7 @@ export default function AiAssistant() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-          placeholder={`Ask about ${activeFieldName || 'your field'}...`}
+          placeholder={`Ask about ${DEVICE_NAME}...`}
           disabled={isLoading}
           className="flex-1 text-sm px-4 py-3 rounded-xl focus:outline-none transition-colors"
           style={{
