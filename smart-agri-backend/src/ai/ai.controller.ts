@@ -15,6 +15,16 @@ export class AiController {
         return this.aiService.generateFieldInsight(deviceId);
     }
 
+    @Get('suggest-crop/:deviceId')
+    async suggestCrop(@Param('deviceId') deviceId: string) {
+        return this.aiService.suggestCrop(deviceId);
+    }
+
+    @Post('evaluate-crop')
+    async evaluateCrop(@Body() body: { deviceId: string; cropName: string }) {
+        return this.aiService.evaluateCrop(body.deviceId, body.cropName);
+    }
+
     @Get('sessions')
     async getSessions() {
         return this.aiService.getChatSessions();

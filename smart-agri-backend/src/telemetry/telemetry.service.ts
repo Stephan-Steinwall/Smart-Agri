@@ -8,6 +8,55 @@ export class TelemetryService {
 
     constructor(private readonly supabaseService: SupabaseService) {}
 
+    private clampScore(value: number): number {
+        return Math.min(100, Math.max(0, value));
+    }
+
+    private calculateSoilHealthScore(row: any): number | null {
+        const dbScore = row?.soil_health_score ?? row?.health_score ?? row?.soilHealthScore ?? row?.healthScore;
+        if (dbScore != null && !Number.isNaN(Number(dbScore))) {
+            return Math.round(Number(dbScore));
+        }
+
+        const moisture = row?.soil_moisture_percent ?? row?.moisture ?? null;
+        const temperature = row?.soil_temperature_celsius ?? row?.temperature ?? null;
+        const ph = row?.soil_ph ?? row?.ph ?? null;
+        const nitrogen = row?.nitrogen ?? null;
+        const phosphorus = row?.phosphorus ?? null;
+        const potassium = row?.potassium ?? null;
+        const electricalConductivity = row?.ec_levels ?? row?.electricalConductivity ?? row?.soil_conductivity ?? null;
+
+        const scores: number[] = [];
+
+        if (moisture != null) {
+            scores.push(this.clampScore(100 - Math.abs(moisture - 55) * 1.25));
+        }
+        if (temperature != null) {
+            scores.push(this.clampScore(100 - Math.abs(temperature - 25) * 2));
+        }
+        if (ph != null) {
+            scores.push(this.clampScore(100 - Math.abs(ph - 6.5) * 20));
+        }
+        if (nitrogen != null) {
+            scores.push(this.clampScore(100 - Math.abs(nitrogen - 50) * 1.2));
+        }
+        if (phosphorus != null) {
+            scores.push(this.clampScore(100 - Math.abs(phosphorus - 25) * 2));
+        }
+        if (potassium != null) {
+            scores.push(this.clampScore(100 - Math.abs(potassium - 35) * 1.4));
+        }
+        if (electricalConductivity != null) {
+            scores.push(this.clampScore(100 - Math.abs(electricalConductivity - 1.5) * 30));
+        }
+
+        if (scores.length === 0) {
+            return null;
+        }
+
+        return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+    }
+
     private mapSupabaseToEntity(row: any): SensorReading | null {
         if (!row) return null;
         return {
@@ -19,8 +68,19 @@ export class TelemetryService {
             moisture: row.soil_moisture_percent ?? null,
             temperature: row.soil_temperature_celsius ?? null,
             ph: row.soil_ph ?? null,
+            soilConductivity: row.ec_levels ?? null,
+            salinity: row.salinity ?? null,
+            tds: row.tds_mg_l ?? null,
             electricalConductivity: row.ec_levels ?? null,
-            batteryLevel: row.battery_voltage ?? null,
+            batteryVoltage: row.battery_voltage ?? null,
+            batteryStatus: row.battery_status ?? null,
+            receiverWifiConnected: row.receiver_wifi_connected ?? null,
+            receiverWifiSignalStrength: row.receiver_wifi_signal_strength_dbm ?? null,
+            receiverWifiQuality: row.receiver_wifi_signal_quality ?? null,
+            sensorStatus: row.sensor_status ?? null,
+            receiverUptimeMinutes: row.receiver_uptime_minutes ?? null,
+            receiverUptimeSeconds: row.receiver_uptime_seconds ?? null,
+            soilHealthScore: this.calculateSoilHealthScore(row),
         };
     }
 
@@ -57,4 +117,76 @@ export class TelemetryService {
         // Reverse so the chart goes left-to-right (old to new)
         return (data.map((row) => this.mapSupabaseToEntity(row)).filter(Boolean) as SensorReading[]).reverse(); 
     }
-}
+
+    // Save a user-labeled analysis into the Supabase table "Wireless sensor Soil Analysis data"
+    async saveAnalysis(payload: any): Promise<any> {
+        try {
+            const row = {
+                label: payload.label ?? 'Unnamed Analysis',
+                soil_moisture: payload.soil_moisture ?? payload.soilMetrics?.moisture ?? null,
+                temperature: payload.temperature ?? payload.soilMetrics?.temperature ?? null,
+                soil_ph: payload.soil_ph ?? payload.soilMetrics?.ph ?? null,
+                soil_conductivity: payload.soil_conductivity ?? payload.soilMetrics?.conductivity ?? null,
+                soil_health_score: payload.soil_health_score ?? payload.soilHealthScore ?? null,
+                nitrogen: payload.nitrogen ?? payload.soilMetrics?.nitrogen ?? null,
+                phosphorus: payload.phosphorus ?? payload.soilMetrics?.phosphorus ?? null,
+                potassium: payload.potassium ?? payload.soilMetrics?.potassium ?? null,
+                tds: payload.tds ?? payload.soilMetrics?.tds ?? null,
+                salinity: payload.salinity ?? payload.soilMetrics?.salinity ?? null,
+                recommended_crop: payload.recommended_crop ?? payload.cropRecommendation ?? null,
+                recommendation_reason: payload.recommendation_reason ?? payload.recommendationReason ?? null,
+                device_id: payload.deviceId ?? payload.device_id ?? 'agribot_receiver_01',
+            };
+
+            // Table name contains spaces; supply the exact table name (Supabase client quotes internally)
+            const { data, error } = await this.supabaseService.getClient()
+                .from('Wireless sensor Soil Analysis data')
+                .insert(row)
+                .select()
+                .single();
+
+            if (error) {
+                this.logger.error(`Error saving analysis: ${error.message}`);
+                throw new Error(error.message);
+            }
+
+            return data;
+        } catch (err: any) {
+            this.logger.error(`saveAnalysis failed: ${err?.message ?? String(err)}`);
+            throw err;
+        }
+    }
+
+    // Delete analysis rows by id or ids
+    async deleteAnalysis(payload: any): Promise<any> {
+        try {
+            const ids: string[] = payload?.ids ?? (payload?.id ? [payload.id] : []);
+            if (!ids || ids.length === 0) {
+                // Nothing to delete; return gracefully
+                return { deleted: 0, rows: [] };
+            }
+
+            const query = this.supabaseService.getClient()
+                .from('Wireless sensor Soil Analysis data')
+                .delete();
+
+            let result;
+            if (ids.length === 1) {
+                result = await query.eq('id', ids[0]).select().single();
+            } else {
+                result = await query.in('id', ids).select();
+            }
+
+            const { data, error } = result as any;
+            if (error) {
+                this.logger.error(`Error deleting analysis: ${error.message}`);
+                throw new Error(error.message);
+            }
+
+            return { deleted: Array.isArray(data) ? data.length : 1, rows: data };
+        } catch (err: any) {
+            this.logger.error(`deleteAnalysis failed: ${err?.message ?? String(err)}`);
+            throw err;
+        }
+    }
+}

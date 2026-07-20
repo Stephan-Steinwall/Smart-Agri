@@ -11,11 +11,13 @@ import NotificationBell from './NotificationBell';
 const navItems = [
   { href: '/',               icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/ai-assistant',   icon: Bot,              label: 'AI Assistant' },
+  { href: '/wireless-soil-sensor', icon: Wifi,        label: 'Wireless Soil Sensor' },
 ];
 
 const pageTitles: Record<string, string> = {
-  '/':             'Farm Overview',
-  '/ai-assistant': 'AI Assistant',
+  '/':                  'Farm Overview',
+  '/ai-assistant':      'AI Assistant',
+  '/wireless-soil-sensor': 'Wireless Soil Sensor',
 };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -91,13 +93,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   }
                 }}
               >
-                {/* Active left accent bar */}
-                {isActive && (
-                  <span
-                    className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full"
-                    style={{ background: 'hsl(142, 70%, 65%)' }}
-                  />
-                )}
                 <Icon
                   className="w-4 h-4 mr-3 flex-shrink-0"
                   style={{ color: isActive ? 'hsl(142, 70%, 75%)' : 'inherit', opacity: isActive ? 1 : 0.7 }}

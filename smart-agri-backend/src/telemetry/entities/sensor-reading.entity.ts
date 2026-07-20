@@ -11,8 +11,21 @@ export interface SensorReading {
     moisture: number | null;
     temperature: number | null;
     ph: number | null;
-
-    // Electrical Data
+    salinity: number | null;
+    tds: number | null;
+    soilConductivity: number | null;
     electricalConductivity: number | null;
-    batteryLevel: number | null;
-}
+
+    // Power and connectivity
+    batteryVoltage: number | null;
+    batteryStatus: string | null;
+    receiverWifiConnected: boolean | null;
+    receiverWifiSignalStrength: number | null;
+    receiverWifiQuality: string | null;
+    sensorStatus: string | null;
+    receiverUptimeMinutes: number | null;
+    receiverUptimeSeconds: number | null;
+
+    // Derived soil health
+    soilHealthScore: number | null;
+}
