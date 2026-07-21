@@ -4,13 +4,28 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun
+  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun, FlaskConical
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
-const navItems = [
+type NavItem = {
+  href?: string;
+  icon: any;
+  label: string;
+  children?: { href: string; label: string }[];
+};
+
+const navItems: NavItem[] = [
   { href: '/',               icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/local-weather',  icon: CloudSun,         label: 'Local Weather' },
+  { 
+    icon: FlaskConical,     
+    label: 'Data Analytics',
+    children: [
+      { href: '/field-data-analysis', label: 'Field Data Analytics' },
+      { href: '/wireless-soil-sensor/analyze', label: 'Wireless Sensor Soil Analysis' }
+    ]
+  },
   { href: '/ai-assistant',   icon: Bot,              label: 'AI Assistant' },
   { href: '/wireless-soil-sensor', icon: Wifi,        label: 'Wireless Soil Sensor' },
 ];
@@ -18,6 +33,7 @@ const navItems = [
 const pageTitles: Record<string, string> = {
   '/':                  'Farm Overview',
   '/local-weather':     'Local Weather Station',
+  '/field-data-analysis': 'Field Data Analysis',
   '/ai-assistant':      'AI Assistant',
   '/wireless-soil-sensor': 'Wireless Soil Sensor',
 };
@@ -70,12 +86,76 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Nav items */}
         <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto pb-4">
-          {navItems.map(({ href, icon: Icon, label }) => {
-            const isActive = pathname === href;
+          {navItems.map((item) => {
+            if (item.children) {
+              const isActive = item.children.some(child => pathname === child.href);
+              return (
+                <div key={item.label} className="group relative">
+                  <div
+                    className="flex items-center px-3 py-3 rounded-xl text-sm font-medium transition-all duration-200 cursor-default"
+                    style={{
+                      color: isActive ? 'white' : 'var(--sidebar-foreground)',
+                      background: isActive ? 'hsl(142, 58%, 28%)' : 'transparent',
+                      boxShadow: isActive ? 'var(--shadow-sidebar-active)' : 'none',
+                    }}
+                    onMouseEnter={e => {
+                      if (!isActive) {
+                        (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-accent)';
+                        (e.currentTarget as HTMLElement).style.color = 'var(--sidebar-accent-foreground)';
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      if (!isActive) {
+                        (e.currentTarget as HTMLElement).style.background = 'transparent';
+                        (e.currentTarget as HTMLElement).style.color = 'var(--sidebar-foreground)';
+                      }
+                    }}
+                  >
+                    <item.icon
+                      className="w-4 h-4 mr-3 flex-shrink-0"
+                      style={{ color: isActive ? 'hsl(142, 70%, 75%)' : 'inherit', opacity: isActive ? 1 : 0.7 }}
+                    />
+                    <span className="flex-1">{item.label}</span>
+                    <ChevronRight className="w-3.5 h-3.5 opacity-60 group-hover:rotate-90 transition-transform" />
+                  </div>
+                  
+                  {/* Hover dropdown (Accordion) */}
+                  <div className="max-h-0 overflow-hidden transition-all duration-300 ease-in-out group-hover:max-h-40">
+                    <div className="flex flex-col gap-1 py-1.5 pl-10 pr-2">
+                      {item.children.map(child => {
+                        const isChildActive = pathname === child.href;
+                        return (
+                          <Link 
+                            key={child.href}
+                            href={child.href}
+                            className="px-3 py-2 text-xs font-medium rounded-lg transition-colors"
+                            style={{ 
+                              color: isChildActive ? 'white' : 'var(--sidebar-foreground)',
+                              background: isChildActive ? 'rgba(255,255,255,0.1)' : 'transparent'
+                            }}
+                            onMouseEnter={e => {
+                              if (!isChildActive) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
+                            }}
+                            onMouseLeave={e => {
+                              if (!isChildActive) (e.currentTarget as HTMLElement).style.background = 'transparent';
+                            }}
+                          >
+                            {child.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // Normal link
+            const isActive = pathname === item.href;
             return (
               <Link
-                key={href}
-                href={href}
+                key={item.href}
+                href={item.href!}
                 className="group flex items-center px-3 py-3 rounded-xl text-sm font-medium transition-all duration-200 relative"
                 style={{
                   color: isActive ? 'white' : 'var(--sidebar-foreground)',
@@ -95,11 +175,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   }
                 }}
               >
-                <Icon
+                <item.icon
                   className="w-4 h-4 mr-3 flex-shrink-0"
                   style={{ color: isActive ? 'hsl(142, 70%, 75%)' : 'inherit', opacity: isActive ? 1 : 0.7 }}
                 />
-                <span className="flex-1">{label}</span>
+                <span className="flex-1">{item.label}</span>
                 {isActive && (
                   <ChevronRight className="w-3.5 h-3.5 opacity-60" />
                 )}
