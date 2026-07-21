@@ -206,10 +206,11 @@ export default function LocalWeatherPage() {
               <p className="text-xs text-muted-foreground">Air quality, pressure, and heat metrics</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <StatCard icon={Thermometer} label="Air Temp" value={LATEST.air_temperature.toFixed(1)} unit="°C" color="hsl(20, 80%, 52%)" bgColor="hsl(20, 80%, 95%)" />
             <StatCard icon={Droplets} label="Humidity" value={LATEST.humidity_percent.toFixed(0)} unit="%" color="hsl(210, 68%, 48%)" bgColor="hsl(210, 68%, 95%)" />
             <StatCard icon={Gauge} label="Pressure" value={LATEST.atmospheric_pressure_hpa.toFixed(0)} unit="hPa" color="hsl(260, 40%, 50%)" bgColor="hsl(260, 40%, 95%)" />
+            <StatCard icon={Activity} label="Pressure Cond" value={LATEST.pressure_condition} unit="" color="hsl(260, 40%, 65%)" bgColor="hsl(260, 40%, 95%)" />
             <StatCard icon={Sun} label="Heat Index" value={LATEST.heat_index.toFixed(1)} unit="°C" color="hsl(15, 80%, 55%)" bgColor="hsl(15, 80%, 95%)" />
             <StatCard icon={Cloud} label="Dew Point" value={LATEST.dew_point.toFixed(1)} unit="°C" color="hsl(200, 60%, 50%)" bgColor="hsl(200, 60%, 95%)" />
             <StatCard icon={Activity} label="Dew Pt Spread" value={LATEST.dew_point_spread_c.toFixed(1)} unit="°C" color="hsl(280, 50%, 60%)" bgColor="hsl(280, 50%, 95%)" />
@@ -248,10 +249,12 @@ export default function LocalWeatherPage() {
               <p className="text-xs text-muted-foreground">Light and ground metrics</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard icon={Sun} label="Light Int." value={(LATEST.light_intensity / 1000).toFixed(1)} unit="k lx" color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)" />
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <StatCard icon={Sun} label="Light Int." value={LATEST.light_intensity.toFixed(1)} unit="lux" color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)" />
             <StatCard icon={CloudSun} label="Light Cond." value={LATEST.light_condition} unit="" color="hsl(35, 90%, 55%)" bgColor="hsl(35, 90%, 95%)" />
+            <StatCard icon={Mountain} label="Altitude" value={LATEST.altitude_m.toFixed(1)} unit="m" color="hsl(210, 40%, 50%)" bgColor="hsl(210, 40%, 95%)" />
             <StatCard icon={Sprout} label="Soil Temp" value={LATEST.soil_temperature.toFixed(1)} unit="°C" color="hsl(142, 60%, 40%)" bgColor="hsl(142, 60%, 95%)" />
+            <StatCard icon={Leaf} label="Soil Cond" value={LATEST.soil_condition} unit="" color="hsl(120, 60%, 35%)" bgColor="hsl(120, 60%, 95%)" />
             <StatCard icon={Activity} label="Soil vs Air" value={LATEST.soil_vs_air > 0 ? `+${LATEST.soil_vs_air.toFixed(1)}` : LATEST.soil_vs_air.toFixed(1)} unit="°C" color="hsl(280, 50%, 50%)" bgColor="hsl(280, 50%, 95%)" />
           </div>
         </section>

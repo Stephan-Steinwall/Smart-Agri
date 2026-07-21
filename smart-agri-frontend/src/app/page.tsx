@@ -7,7 +7,7 @@ import AiInsightCard from '@/components/AiInsightCard';
 import {
   Activity, Droplets, Thermometer, Sprout,
   BrainCircuit, BarChart2, CloudSun, Beaker, Zap, Leaf, FlaskConical, Target,
-  Wind, CloudRain, Sun, Gauge, Cloud
+  Wind, CloudRain, Sun, Gauge, Cloud, ShieldAlert, Umbrella
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -20,15 +20,7 @@ const DEVICE_ID = 'agribot_receiver_01';
 const DEVICE_NAME = 'Main Field Node';
 
 // ── Mock Test Data ──────────────────────────────────────────────────────────
-const WEATHER_STATION_DATA = {
-  ambientTemp: 24.5,
-  humidity: 62,
-  windSpeed: 12.4,
-  windDirection: 'NE',
-  rainfall24h: 2.4, // mm
-  solarRadiation: 850, // W/m²
-  pressure: 1012 // hPa
-};
+// (WEATHER_STATION_DATA mock removed, using live DB instead)
 
 // ── Mock Test Data ──────────────────────────────────────────────────────────
 const TEST_DATA = Array.from({ length: 24 }).map((_, i) => {
@@ -119,6 +111,32 @@ export default function Dashboard() {
     refetchInterval: 60000, // Refresh every minute
   });
 
+  // Local Microclimate environment data
+  const { data: envData } = useQuery({
+    queryKey: ['environmentLatest', DEVICE_ID],
+    queryFn: async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/telemetry/environment/latest/${DEVICE_ID}`, { timeout: 3000 });
+        return res.data;
+      } catch (error) {
+        return null;
+      }
+    },
+    retry: false,
+    refetchInterval: 10000, // Auto refresh every 10s
+  });
+
+  // Safe fallback if db is empty
+  const LATEST = envData || {
+    light_condition: "N/A",
+    rain_status: "N/A",
+    rain_wetness_percent: 0,
+    air_temperature_c: 0,
+    humidity_percent: 0,
+    condensation_risk: "N/A",
+    atmospheric_pressure_hpa: 0,
+  };
+
   // Latest readings for stat cards
   const latestReading = chartData?.[chartData.length - 1];
 
@@ -189,31 +207,41 @@ export default function Dashboard() {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
-            icon={Thermometer} label="Ambient Temp"
-            value={WEATHER_STATION_DATA.ambientTemp.toFixed(1)} unit="°C"
+            icon={CloudSun} label="Light Condition"
+            value={LATEST.light_condition} unit=""
+            color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)"
+          />
+          <StatCard
+            icon={Umbrella} label="Rain Status"
+            value={LATEST.rain_status} unit=""
+            color="hsl(220, 70%, 50%)" bgColor="hsl(220, 70%, 95%)"
+          />
+          <StatCard
+            icon={Droplets} label="Rain Wetness"
+            value={LATEST.rain_wetness_percent?.toFixed(0) || 0} unit="%"
+            color="hsl(210, 80%, 45%)" bgColor="hsl(210, 80%, 95%)"
+          />
+          <StatCard
+            icon={Thermometer} label="Air Temp"
+            value={LATEST.air_temperature_c?.toFixed(1) || 0} unit="°C"
             color="hsl(20, 80%, 52%)" bgColor="hsl(20, 80%, 95%)"
           />
           <StatCard
             icon={Cloud} label="Humidity"
-            value={WEATHER_STATION_DATA.humidity} unit="%"
+            value={LATEST.humidity_percent?.toFixed(0) || 0} unit="%"
             color="hsl(210, 68%, 48%)" bgColor="hsl(210, 68%, 95%)"
           />
           <StatCard
-            icon={CloudRain} label="24h Rainfall"
-            value={WEATHER_STATION_DATA.rainfall24h.toFixed(1)} unit="mm"
-            color="hsl(220, 70%, 50%)" bgColor="hsl(220, 70%, 95%)"
+            icon={ShieldAlert} label="Condensation Risk"
+            value={LATEST.condensation_risk} unit=""
+            color="hsl(330, 60%, 50%)" bgColor="hsl(330, 60%, 95%)"
           />
           <StatCard
-            icon={Wind} label="Wind Speed"
-            value={WEATHER_STATION_DATA.windSpeed.toFixed(1)} unit="km/h"
-            color="hsl(180, 50%, 45%)" bgColor="hsl(180, 50%, 95%)"
-          />
-          <StatCard
-            icon={Sun} label="Solar Radiation"
-            value={WEATHER_STATION_DATA.solarRadiation} unit="W/m²"
-            color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)"
+            icon={Gauge} label="Atm. Pressure"
+            value={LATEST.atmospheric_pressure_hpa?.toFixed(0) || 0} unit="hPa"
+            color="hsl(260, 40%, 50%)" bgColor="hsl(260, 40%, 95%)"
           />
         </div>
       </section>
