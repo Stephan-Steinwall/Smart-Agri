@@ -74,9 +74,9 @@ export default function WeatherWidget() {
           <p className="text-[11px] font-medium uppercase tracking-wider opacity-90 mt-1">{getWeatherText(weathercode)}</p>
         </div>
       </div>
-      
+
       <div className="w-px h-10 bg-white/20"></div>
-      
+
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-2 text-xs opacity-90 font-medium">
           <Wind className="w-3.5 h-3.5" />

@@ -1,13 +1,14 @@
 // src/app/page.tsx
 "use client";
 
+import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import AiInsightCard from '@/components/AiInsightCard';
 import {
   Activity, Droplets, Thermometer, Sprout,
   BrainCircuit, BarChart2, CloudSun, Beaker, Zap, Leaf, FlaskConical, Target,
-  Wind, CloudRain, Sun, Gauge, Cloud
+  Wind, CloudRain, Sun, Gauge, Cloud, ShieldAlert, Umbrella, Power, ChevronRight
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -20,15 +21,7 @@ const DEVICE_ID = 'agribot_receiver_01';
 const DEVICE_NAME = 'Main Field Node';
 
 // ── Mock Test Data ──────────────────────────────────────────────────────────
-const WEATHER_STATION_DATA = {
-  ambientTemp: 24.5,
-  humidity: 62,
-  windSpeed: 12.4,
-  windDirection: 'NE',
-  rainfall24h: 2.4, // mm
-  solarRadiation: 850, // W/m²
-  pressure: 1012 // hPa
-};
+// (WEATHER_STATION_DATA mock removed, using live DB instead)
 
 // ── Mock Test Data ──────────────────────────────────────────────────────────
 const TEST_DATA = Array.from({ length: 24 }).map((_, i) => {
@@ -102,8 +95,51 @@ function CustomTooltip({ active, payload, label }: any) {
   );
 }
 
+// ── Pump Control Card ─────────────────────────────────────────────────────────
+function PumpControl({
+  label, icon: Icon, isActive, onClick, color
+}: {
+  label: string; icon: React.ElementType; isActive: boolean; onClick: () => void; color: string;
+}) {
+  return (
+    <div 
+      className={`rounded-2xl p-4 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all border-2 ${
+        isActive ? 'scale-[1.02]' : 'hover:bg-muted/50'
+      }`}
+      style={isActive ? { background: 'var(--card)', boxShadow: 'var(--shadow-card)', borderColor: color } : { borderColor: 'var(--border)', background: 'transparent' }}
+      onClick={onClick}
+    >
+      <div 
+        className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
+          isActive ? 'shadow-sm' : ''
+        }`}
+        style={{ 
+          background: isActive ? color : 'var(--muted)',
+          color: isActive ? 'white' : 'var(--muted-foreground)'
+        }}
+      >
+        <Icon className="w-6 h-6" />
+      </div>
+      <div className="text-center">
+        <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>{label}</p>
+        <p className="text-xs font-bold mt-1 uppercase tracking-wider" style={{ color: isActive ? color : 'var(--muted-foreground)' }}>
+          {isActive ? 'PUMPING...' : 'OFF'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const [isSystemOn, setIsSystemOn] = useState(true);
+  const [pumps, setPumps] = useState({
+    water: false,
+    nitrogen: false,
+    potassium: false,
+    phosphorus: false
+  });
+
   // Telemetry chart for the specific device
   const { data: chartData, isLoading: chartLoading } = useQuery({
     queryKey: ['fieldTelemetry', DEVICE_ID],
@@ -118,6 +154,32 @@ export default function Dashboard() {
     },
     refetchInterval: 60000, // Refresh every minute
   });
+
+  // Local Microclimate environment data
+  const { data: envData } = useQuery({
+    queryKey: ['environmentLatest', DEVICE_ID],
+    queryFn: async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/telemetry/environment/latest/${DEVICE_ID}`, { timeout: 3000 });
+        return res.data;
+      } catch (error) {
+        return null;
+      }
+    },
+    retry: false,
+    refetchInterval: 10000, // Auto refresh every 10s
+  });
+
+  // Safe fallback if db is empty
+  const LATEST = envData || {
+    light_condition: "N/A",
+    rain_status: "N/A",
+    rain_wetness_percent: 0,
+    air_temperature_c: 0,
+    humidity_percent: 0,
+    condensation_risk: "N/A",
+    atmospheric_pressure_hpa: 0,
+  };
 
   // Latest readings for stat cards
   const latestReading = chartData?.[chartData.length - 1];
@@ -163,9 +225,24 @@ export default function Dashboard() {
             <WeatherWidget />
             
             <div className="flex flex-col items-end gap-1.5 border-t md:border-t-0 md:border-l border-white/20 pt-3 md:pt-0 md:pl-6">
+              
+              <div className="flex items-center gap-2 mb-2">
+                <button 
+                  onClick={() => setIsSystemOn(!isSystemOn)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-colors border shadow-sm ${
+                    isSystemOn 
+                    ? 'bg-green-500/20 text-green-100 border-green-400/30 hover:bg-green-500/30' 
+                    : 'bg-red-500/20 text-red-100 border-red-500/30 hover:bg-red-500/30'
+                  }`}
+                >
+                  <Power className="w-3.5 h-3.5" />
+                  {isSystemOn ? 'System ON' : 'System OFF'}
+                </button>
+              </div>
+
               <div className="flex items-center gap-2 text-sm opacity-90 font-medium">
-                <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.6)]" />
-                <span>Live System</span>
+                <span className={`w-2.5 h-2.5 rounded-full ${isSystemOn ? 'bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.6)]' : 'bg-red-500'}`} />
+                <span>{isSystemOn ? 'Live System' : 'System Offline'}</span>
               </div>
               <p className="text-xs opacity-75 font-medium uppercase tracking-wider">
                 {new Date().toLocaleDateString('en-US', {
@@ -189,31 +266,41 @@ export default function Dashboard() {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
-            icon={Thermometer} label="Ambient Temp"
-            value={WEATHER_STATION_DATA.ambientTemp.toFixed(1)} unit="°C"
+            icon={CloudSun} label="Light Condition"
+            value={LATEST.light_condition} unit=""
+            color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)"
+          />
+          <StatCard
+            icon={Umbrella} label="Rain Status"
+            value={LATEST.rain_status} unit=""
+            color="hsl(220, 70%, 50%)" bgColor="hsl(220, 70%, 95%)"
+          />
+          <StatCard
+            icon={Droplets} label="Rain Wetness"
+            value={LATEST.rain_wetness_percent?.toFixed(0) || 0} unit="%"
+            color="hsl(210, 80%, 45%)" bgColor="hsl(210, 80%, 95%)"
+          />
+          <StatCard
+            icon={Thermometer} label="Air Temp"
+            value={LATEST.air_temperature_c?.toFixed(1) || 0} unit="°C"
             color="hsl(20, 80%, 52%)" bgColor="hsl(20, 80%, 95%)"
           />
           <StatCard
             icon={Cloud} label="Humidity"
-            value={WEATHER_STATION_DATA.humidity} unit="%"
+            value={LATEST.humidity_percent?.toFixed(0) || 0} unit="%"
             color="hsl(210, 68%, 48%)" bgColor="hsl(210, 68%, 95%)"
           />
           <StatCard
-            icon={CloudRain} label="24h Rainfall"
-            value={WEATHER_STATION_DATA.rainfall24h.toFixed(1)} unit="mm"
-            color="hsl(220, 70%, 50%)" bgColor="hsl(220, 70%, 95%)"
+            icon={ShieldAlert} label="Condensation Risk"
+            value={LATEST.condensation_risk} unit=""
+            color="hsl(330, 60%, 50%)" bgColor="hsl(330, 60%, 95%)"
           />
           <StatCard
-            icon={Wind} label="Wind Speed"
-            value={WEATHER_STATION_DATA.windSpeed.toFixed(1)} unit="km/h"
-            color="hsl(180, 50%, 45%)" bgColor="hsl(180, 50%, 95%)"
-          />
-          <StatCard
-            icon={Sun} label="Solar Radiation"
-            value={WEATHER_STATION_DATA.solarRadiation} unit="W/m²"
-            color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)"
+            icon={Gauge} label="Atm. Pressure"
+            value={LATEST.atmospheric_pressure_hpa?.toFixed(0) || 0} unit="hPa"
+            color="hsl(260, 40%, 50%)" bgColor="hsl(260, 40%, 95%)"
           />
         </div>
       </section>
@@ -280,47 +367,103 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* ── AI Insight Cards ─────────────────────────────────────────────── */}
-      <section>
-        <div className="flex items-center gap-3 mb-5">
-          <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{ background: 'hsl(142, 65%, 94%)' }}
-          >
-            <BrainCircuit className="w-4 h-4" style={{ color: 'var(--primary)' }} />
-          </div>
-          <div>
-            <h3 className="font-bold text-base" style={{ color: 'var(--foreground)' }}>
-              Autonomous Agronomist Insights
-            </h3>
-            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-              AI-generated soil health analysis updated every 5 minutes
-            </p>
+      {/* ── Manual Override Controls ───────────────────────────────────────────── */}
+      <section className="bg-muted/20 border border-border rounded-2xl p-5 md:p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-orange-50">
+              <Zap className="w-4 h-4 text-orange-500" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-foreground">Manual Override Controls</h3>
+              <p className="text-xs text-muted-foreground">Directly toggle irrigation and nutrient dosing pumps</p>
+            </div>
           </div>
         </div>
+        
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <PumpControl 
+            label="Water Pump" icon={Droplets} isActive={pumps.water} 
+            onClick={() => setPumps({...pumps, water: !pumps.water})} color="hsl(210, 80%, 50%)" 
+          />
+          <PumpControl 
+            label="Nitrogen (N)" icon={FlaskConical} isActive={pumps.nitrogen} 
+            onClick={() => setPumps({...pumps, nitrogen: !pumps.nitrogen})} color="hsl(280, 70%, 50%)" 
+          />
+          <PumpControl 
+            label="Phosphorus (P)" icon={FlaskConical} isActive={pumps.phosphorus} 
+            onClick={() => setPumps({...pumps, phosphorus: !pumps.phosphorus})} color="hsl(45, 90%, 45%)" 
+          />
+          <PumpControl 
+            label="Potassium (K)" icon={FlaskConical} isActive={pumps.potassium} 
+            onClick={() => setPumps({...pumps, potassium: !pumps.potassium})} color="hsl(15, 80%, 55%)" 
+          />
+        </div>
+      </section>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          <AiInsightCard deviceId={DEVICE_ID} fieldName={DEVICE_NAME} />
+      {/* ── Dosing History Overview ─────────────────────────────────────────────── */}
+      <section className="mb-4">
+        <div className="flex items-center gap-3 mb-4 mt-2">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-gray-100">
+            <Activity className="w-4 h-4 text-gray-500" />
+          </div>
+          <div>
+            <h3 className="font-bold text-base text-foreground">Dosing History Overview</h3>
+            <p className="text-xs text-muted-foreground">Last time resources were dispensed</p>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><Droplets className="w-3 h-3"/> Water</p>
+            <p className="text-sm font-bold">2 hours ago</p>
+            <p className="text-xs text-blue-500 mt-1 font-medium">12.5 Liters</p>
+          </div>
+          <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><FlaskConical className="w-3 h-3"/> Nitrogen</p>
+            <p className="text-sm font-bold">Yesterday, 4:30 PM</p>
+            <p className="text-xs text-purple-500 mt-1 font-medium">450 ml</p>
+          </div>
+          <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><FlaskConical className="w-3 h-3"/> Phosphorus</p>
+            <p className="text-sm font-bold">3 days ago</p>
+            <p className="text-xs text-pink-500 mt-1 font-medium">200 ml</p>
+          </div>
+          <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><FlaskConical className="w-3 h-3"/> Potassium</p>
+            <p className="text-sm font-bold">3 days ago</p>
+            <p className="text-xs text-yellow-600 mt-1 font-medium">350 ml</p>
+          </div>
         </div>
       </section>
 
       {/* ── Comprehensive Analytics ──────────────────────────────────────── */}
       <section>
-        <div className="flex items-center gap-3 mb-5">
-          <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{ background: 'hsl(210, 68%, 95%)' }}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-8 h-8 rounded-xl flex items-center justify-center"
+              style={{ background: 'hsl(210, 68%, 95%)' }}
+            >
+              <BarChart2 className="w-4 h-4" style={{ color: 'hsl(210, 68%, 48%)' }} />
+            </div>
+            <div>
+              <h3 className="font-bold text-base" style={{ color: 'var(--foreground)' }}>
+                Detailed Sensor Analytics
+              </h3>
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                Real-time monitoring across multiple soil parameters
+              </p>
+            </div>
+          </div>
+          
+          <Link 
+            href="/field-data-analysis"
+            className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all hover:opacity-90 active:scale-95 shadow-sm"
+            style={{ background: 'var(--primary)', color: 'white' }}
           >
-            <BarChart2 className="w-4 h-4" style={{ color: 'hsl(210, 68%, 48%)' }} />
-          </div>
-          <div>
-            <h3 className="font-bold text-base" style={{ color: 'var(--foreground)' }}>
-              Detailed Sensor Analytics
-            </h3>
-            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-              Real-time monitoring across multiple soil parameters
-            </p>
-          </div>
+            Full Data Analysis <ChevronRight className="w-4 h-4" />
+          </Link>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
