@@ -7,6 +7,6 @@ import { TelemetryModule } from '../telemetry/telemetry.module';
 @Module({
   imports: [TelemetryModule],
   providers: [AiService],
-  controllers: [AiController]
+  controllers: [AiController],
 })
-export class AiModule { }
+export class AiModule {}

@@ -3,25 +3,41 @@ import { AiService } from './ai.service';
 
 @Controller('ai')
 export class AiController {
-    constructor(private readonly aiService: AiService) { }
+  constructor(private readonly aiService: AiService) {}
 
-    @Post('chat')
-    async chat(@Body() body: { query: string; deviceId: string; sessionId: string }) {
-        return this.aiService.askAgronomist(body.query, body.deviceId, body.sessionId);
-    }
+  @Post('chat')
+  async chat(
+    @Body() body: { query: string; deviceId: string; sessionId: string },
+  ) {
+    return this.aiService.askAgronomist(
+      body.query,
+      body.deviceId,
+      body.sessionId,
+    );
+  }
 
-    @Get('insight/:deviceId')
-    async getInsight(@Param('deviceId') deviceId: string) {
-        return this.aiService.generateFieldInsight(deviceId);
-    }
+  @Get('insight/:deviceId')
+  async getInsight(@Param('deviceId') deviceId: string) {
+    return this.aiService.generateFieldInsight(deviceId);
+  }
 
-    @Get('sessions')
-    async getSessions() {
-        return this.aiService.getChatSessions();
-    }
+  @Get('suggest-crop/:deviceId')
+  async suggestCrop(@Param('deviceId') deviceId: string) {
+    return this.aiService.suggestCrop(deviceId);
+  }
 
-    @Get('history/:sessionId')
-    async getHistory(@Param('sessionId') sessionId: string) {
-        return this.aiService.getChatHistory(sessionId);
-    }
+  @Post('evaluate-crop')
+  async evaluateCrop(@Body() body: { deviceId: string; cropName: string }) {
+    return this.aiService.evaluateCrop(body.deviceId, body.cropName);
+  }
+
+  @Get('sessions')
+  async getSessions() {
+    return this.aiService.getChatSessions();
+  }
+
+  @Get('history/:sessionId')
+  async getHistory(@Param('sessionId') sessionId: string) {
+    return this.aiService.getChatHistory(sessionId);
+  }
 }
