@@ -15,7 +15,6 @@ import axios from 'axios';
 import WeatherWidget from '@/components/WeatherWidget';
 
 // (No mock data fallback - real data only)
-
 // ── Stat mini-card ─────────────────────────────────────────────────────────
 function StatCard({
   icon: Icon, label, value, unit, color, bgColor
@@ -78,7 +77,7 @@ export default function LocalWeatherPage() {
     queryKey: ['environmentHistory'],
     queryFn: async () => {
       // 3-second timeout so the page doesn't hang forever if the backend is offline
-      const res = await axios.get('http://localhost:3001/api/v1/telemetry/environment/history/agribot_receiver_01', {
+      const res = await axios.get('http://localhost:3001/api/v1/telemetry/environment/history/esp32_weather_01', {
         timeout: 3000 
       });
       return res.data;
