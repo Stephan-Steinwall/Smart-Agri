@@ -4,18 +4,20 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi
+  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 const navItems = [
   { href: '/',               icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/local-weather',  icon: CloudSun,         label: 'Local Weather' },
   { href: '/ai-assistant',   icon: Bot,              label: 'AI Assistant' },
   { href: '/wireless-soil-sensor', icon: Wifi,        label: 'Wireless Soil Sensor' },
 ];
 
 const pageTitles: Record<string, string> = {
   '/':                  'Farm Overview',
+  '/local-weather':     'Local Weather Station',
   '/ai-assistant':      'AI Assistant',
   '/wireless-soil-sensor': 'Wireless Soil Sensor',
 };

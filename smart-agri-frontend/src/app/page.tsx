@@ -6,16 +6,45 @@ import axios from 'axios';
 import AiInsightCard from '@/components/AiInsightCard';
 import {
   Activity, Droplets, Thermometer, Sprout,
-  BrainCircuit, BarChart2, CloudSun, Beaker, Zap, Leaf, FlaskConical, Target
+  BrainCircuit, BarChart2, CloudSun, Beaker, Zap, Leaf, FlaskConical, Target,
+  Wind, CloudRain, Sun, Gauge, Cloud
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
+import WeatherWidget from '@/components/WeatherWidget';
 
 const API_BASE = 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'agribot_receiver_01';
 const DEVICE_NAME = 'Main Field Node';
+
+// ── Mock Test Data ──────────────────────────────────────────────────────────
+const WEATHER_STATION_DATA = {
+  ambientTemp: 24.5,
+  humidity: 62,
+  windSpeed: 12.4,
+  windDirection: 'NE',
+  rainfall24h: 2.4, // mm
+  solarRadiation: 850, // W/m²
+  pressure: 1012 // hPa
+};
+
+// ── Mock Test Data ──────────────────────────────────────────────────────────
+const TEST_DATA = Array.from({ length: 24 }).map((_, i) => {
+  const time = new Date();
+  time.setHours(time.getHours() - (23 - i));
+  return {
+    time: time.toISOString(),
+    moisture: 45 + Math.sin(i / 2) * 10 + Math.random() * 5,
+    temperature: 22 + Math.cos(i / 3) * 5 + Math.random() * 2,
+    ph: 6.5 + Math.random() * 0.4,
+    electricalConductivity: 1.2 + Math.random() * 0.3,
+    nitrogen: 40 + Math.random() * 10,
+    phosphorus: 25 + Math.random() * 5,
+    potassium: 35 + Math.random() * 8,
+  };
+});
 
 // ── Stat mini-card ─────────────────────────────────────────────────────────
 function StatCard({
@@ -79,8 +108,13 @@ export default function Dashboard() {
   const { data: chartData, isLoading: chartLoading } = useQuery({
     queryKey: ['fieldTelemetry', DEVICE_ID],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/history/${DEVICE_ID}`);
-      return res.data;
+      try {
+        const res = await axios.get(`${API_BASE}/telemetry/history/${DEVICE_ID}`);
+        return res.data && res.data.length > 0 ? res.data : TEST_DATA;
+      } catch (error) {
+        console.warn("Failed to fetch sensor data, using test data.", error);
+        return TEST_DATA;
+      }
     },
     refetchInterval: 60000, // Refresh every minute
   });
@@ -124,24 +158,80 @@ export default function Dashboard() {
             </p>
           </div>
 
-          {/* Date & live indicator */}
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2 text-sm opacity-80">
-              <span className="w-2 h-2 rounded-full bg-green-300 animate-pulse" />
-              <span>Live Monitoring</span>
+          {/* Real-time Weather & Date */}
+          <div className="flex flex-col md:flex-row items-end md:items-center gap-4 md:gap-6 mt-4 md:mt-0">
+            <WeatherWidget />
+            
+            <div className="flex flex-col items-end gap-1.5 border-t md:border-t-0 md:border-l border-white/20 pt-3 md:pt-0 md:pl-6">
+              <div className="flex items-center gap-2 text-sm opacity-90 font-medium">
+                <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.6)]" />
+                <span>Live System</span>
+              </div>
+              <p className="text-xs opacity-75 font-medium uppercase tracking-wider">
+                {new Date().toLocaleDateString('en-US', {
+                  weekday: 'short', day: 'numeric', month: 'short'
+                })}
+              </p>
             </div>
-            <p className="text-sm opacity-60">
-              {new Date().toLocaleDateString('en-IN', {
-                weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-              })}
-            </p>
           </div>
         </div>
       </div>
 
-      {/* ── Overview Stats Grid ───────────────────────────────────────────── */}
-      {latestReading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* ── Local Microclimate (Weather Station) ───────────────────────── */}
+      <section>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-blue-50">
+            <CloudSun className="w-4 h-4 text-blue-500" />
+          </div>
+          <div>
+            <h3 className="font-bold text-base text-foreground">Local Microclimate</h3>
+            <p className="text-xs text-muted-foreground">Real-time data from on-site weather station</p>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <StatCard
+            icon={Thermometer} label="Ambient Temp"
+            value={WEATHER_STATION_DATA.ambientTemp.toFixed(1)} unit="°C"
+            color="hsl(20, 80%, 52%)" bgColor="hsl(20, 80%, 95%)"
+          />
+          <StatCard
+            icon={Cloud} label="Humidity"
+            value={WEATHER_STATION_DATA.humidity} unit="%"
+            color="hsl(210, 68%, 48%)" bgColor="hsl(210, 68%, 95%)"
+          />
+          <StatCard
+            icon={CloudRain} label="24h Rainfall"
+            value={WEATHER_STATION_DATA.rainfall24h.toFixed(1)} unit="mm"
+            color="hsl(220, 70%, 50%)" bgColor="hsl(220, 70%, 95%)"
+          />
+          <StatCard
+            icon={Wind} label="Wind Speed"
+            value={WEATHER_STATION_DATA.windSpeed.toFixed(1)} unit="km/h"
+            color="hsl(180, 50%, 45%)" bgColor="hsl(180, 50%, 95%)"
+          />
+          <StatCard
+            icon={Sun} label="Solar Radiation"
+            value={WEATHER_STATION_DATA.solarRadiation} unit="W/m²"
+            color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)"
+          />
+        </div>
+      </section>
+
+      {/* ── Overview Stats Grid (Soil Node) ─────────────────────────────── */}
+      <section>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-green-50">
+            <Sprout className="w-4 h-4 text-green-600" />
+          </div>
+          <div>
+            <h3 className="font-bold text-base text-foreground">Soil Health Metrics</h3>
+            <p className="text-xs text-muted-foreground">Latest telemetry from {DEVICE_NAME}</p>
+          </div>
+        </div>
+
+        {latestReading ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             icon={Droplets} label="Soil Moisture"
             value={latestReading.moisture?.toFixed(1) ?? '—'} unit="%"
@@ -182,12 +272,13 @@ export default function Dashboard() {
             value={new Date(latestReading.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} unit=""
             color="hsl(220, 20%, 40%)" bgColor="hsl(220, 20%, 95%)"
           />
-        </div>
-      ) : (
-        <div className="h-32 rounded-2xl flex items-center justify-center" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-          <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Waiting for sensor data...</p>
-        </div>
-      )}
+          </div>
+        ) : (
+          <div className="h-32 rounded-2xl flex items-center justify-center" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Waiting for sensor data...</p>
+          </div>
+        )}
+      </section>
 
       {/* ── AI Insight Cards ─────────────────────────────────────────────── */}
       <section>

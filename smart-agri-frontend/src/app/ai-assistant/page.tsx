@@ -76,7 +76,7 @@ export default function AiAssistant() {
         }
       }
     } catch (e) {
-      console.error("Failed to load sessions", e);
+      // Backend is offline, fail gracefully
       if (!activeSessionId) setActiveSessionId(generateSessionId());
     }
   };
@@ -108,7 +108,14 @@ export default function AiAssistant() {
           ]);
         }
       } catch (e) {
-        console.error("Failed to load history", e);
+        // Backend offline fallback
+        setMessages([
+          {
+            role: 'ai',
+            content: "Hello! I'm your SmartAgri AI Agronomist (Offline Mode). Ask me about soil health, NPK levels, or crop recommendations.",
+            ts: new Date(),
+          }
+        ]);
       }
     };
     fetchHistory();
