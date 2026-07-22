@@ -692,4 +692,155 @@ Do not add any extra commentary or fields.`;
 
     return data;
   }
+
+  async predictRain(deviceId: string, lat: number, lon: number) {
+    // 1. Fetch Local Telemetry History
+    const history = await this.telemetryService.getEnvironmentHistory(deviceId);
+    
+    // We only need the latest few readings to see trends (e.g. last 3 readings)
+    const recentHistory = history.slice(0, 3).map(r => ({
+      time: r.recorded_at,
+      pressure: r.atmospheric_pressure_hpa,
+      pressure_condition: r.pressure_condition,
+      humidity: r.humidity_percent,
+      dew_point: r.dew_point_c,
+      temp: r.air_temperature_c,
+      dew_point_spread: r.dew_point_spread_c,
+    }));
+
+    // 2. Fetch Regional Forecast from Open-Meteo
+    let forecastData: any = null;
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=precipitation_probability,precipitation`;
+      const response = await fetch(url);
+      if (response.ok) {
+        forecastData = await response.json();
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch Open-Meteo data: ${error.message}`);
+    }
+
+    // Extract next 5 hours of precipitation data
+    let regionalPrecip = "Unknown";
+    if (forecastData && forecastData.hourly) {
+       const currentIndex = forecastData.hourly.time.findIndex((t: string) => new Date(t) >= new Date());
+       if (currentIndex !== -1) {
+          const next5HoursPop = forecastData.hourly.precipitation_probability.slice(currentIndex, currentIndex + 5);
+          const next5HoursRain = forecastData.hourly.precipitation.slice(currentIndex, currentIndex + 5);
+          regionalPrecip = `Next 5 hours Precipitation Probabilities: ${next5HoursPop.join('%, ')}% | Next 5 hours Rainfall: ${next5HoursRain.join('mm, ')}mm`;
+       }
+    }
+
+    // 3. Synthesize with OpenAI
+    const systemPrompt = `
+      You are an expert Meteorological AI Assistant for a Smart Agriculture Platform.
+      You combine macro-level regional weather forecasts with hyper-local farm sensor telemetry to provide highly accurate short-term rain predictions.
+      
+      REGIONAL FORECAST (Open-Meteo):
+      ${regionalPrecip}
+
+      HYPER-LOCAL SENSOR TRENDS (Last 3 readings, newest first):
+      ${JSON.stringify(recentHistory, null, 2)}
+
+      INSTRUCTIONS:
+      1. CRITICAL: First and foremost, analyze the local sensor trend (is pressure dropping rapidly? is dew point spread nearing 0? is rain already detected locally?). This local ground-truth data is your absolute primary source of truth.
+      2. ONLY AFTER analyzing the local data, use the regional precipitation probability as a secondary confirmation. If local sensors strongly indicate rain, ignore a low regional probability.
+      3. Synthesize a confident, short-term rain prediction for the farmer based primarily on the local data.
+      4. If rain is expected within the next 5 hours, state the total expected rainfall (mm) and classify the rain_intensity (e.g., "Light", "Moderate", "Heavy", "None").
+      5. Include a boolean "will_rain" field which is true if ANY rain is expected, false otherwise.
+      6. Output ONLY a valid JSON object matching this structure:
+      {
+        "prediction": "A clear, concise 1-2 sentence prediction for the next 5 hours.",
+        "confidence": 85,
+        "reasoning": "Brief explanation of why based on local data first, then regional forecast.",
+        "expected_rainfall_mm": 2.5,
+        "rain_intensity": "Moderate",
+        "will_rain": true
+      }
+    `;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'system', content: systemPrompt }],
+        temperature: 0.2,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message?.content || '{}');
+      
+      // Update Supabase Database with the new prediction
+      if (typeof result.will_rain === 'boolean') {
+        const { data: updateData, error: updateError } = await this.supabaseService.getClient()
+          .from('rain_predictions')
+          .update({
+            will_rain: result.will_rain,
+            updated_at: new Date().toISOString()
+          })
+          .eq('device_id', deviceId)
+          .select();
+          
+        if (updateError) {
+          this.logger.error(`Failed to update rain_predictions table: ${updateError.message}`);
+        } else if (!updateData || updateData.length === 0) {
+          // Row doesn't exist, insert it
+          const { error: insertError } = await this.supabaseService.getClient()
+            .from('rain_predictions')
+            .insert({
+              device_id: deviceId,
+              will_rain: result.will_rain,
+              updated_at: new Date().toISOString()
+            });
+            
+          if (insertError) {
+            this.logger.error(`Failed to insert into rain_predictions table: ${insertError.message}`);
+          }
+        }
+      }
+
+      return result;
+    } catch (error: any) {
+      this.logger.error(`AI Rain Prediction failed: ${error.message}`);
+      return {
+        prediction: "Unable to generate prediction at this time.",
+        confidence: 0,
+        reasoning: "AI synthesis failed or timed out."
+      };
+    }
+  }
+
+  async toggleRainPrediction(deviceId: string, enabled: boolean) {
+    this.logger.log(`Toggling rain prediction for ${deviceId} to ${enabled}`);
+    if (!enabled) {
+      // If turned off, immediately set will_rain to false
+      const { data, error: updateError } = await this.supabaseService.getClient()
+        .from('rain_predictions')
+        .update({
+          will_rain: false,
+          updated_at: new Date().toISOString()
+        })
+        .eq('device_id', deviceId)
+        .select();
+        
+      if (updateError) {
+        this.logger.error(`Failed to force disable rain_prediction (update): ${updateError.message}`);
+      } else if (!data || data.length === 0) {
+        // Row doesn't exist, insert it
+        const { error: insertError } = await this.supabaseService.getClient()
+          .from('rain_predictions')
+          .insert({
+            device_id: deviceId,
+            will_rain: false,
+            updated_at: new Date().toISOString()
+          });
+          
+        if (insertError) {
+          this.logger.error(`Failed to force disable rain_prediction (insert): ${insertError.message}`);
+        }
+      }
+    }
+    return { success: true, enabled };
+  }
 }
+
+

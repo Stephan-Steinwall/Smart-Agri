@@ -10,7 +10,7 @@ import { SupabaseModule } from './supabase/supabase.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [join(__dirname, '..', '.env')],
+      envFilePath: [join(process.cwd(), '.env')],
     }),
     SupabaseModule,
     TelemetryModule,

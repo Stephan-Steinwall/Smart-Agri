@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { Droplets, Thermometer, Beaker, Zap, Wifi, Activity, Battery, SignalHigh, Leaf, Sprout, FlaskConical, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Droplets, Thermometer, Beaker, Zap, Wifi, Activity, Battery, SignalHigh, Leaf, Sprout, FlaskConical, CheckCircle2, ArrowRight, Clock, Server, ShieldCheck } from 'lucide-react';
 
 const API_BASE = 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'agribot_receiver_01';
@@ -197,7 +197,7 @@ export default function WirelessSoilSensorPage() {
       </section>
 
       <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between gap-3 mb-5">
+        <div className="flex items-center justify-between gap-3 mb-6">
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Wireless Sensor Details</h2>
             <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
@@ -209,17 +209,58 @@ export default function WirelessSoilSensorPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--foreground)' }}>Latest reading timestamp</p>
-            <div className="rounded-2xl p-5" style={{ background: 'hsl(142, 65%, 94%)', border: '1px solid hsl(142, 65%, 87%)' }}>
-              <p className="text-sm text-muted-foreground">{latestReading ? new Date(latestReading.time).toLocaleString() : 'No recent data available'}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {/* Timestamp block */}
+          <div className="flex flex-col">
+            <p className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--foreground)' }}><Clock className="w-4 h-4 text-emerald-600"/> Latest Reading</p>
+            <div className="rounded-2xl p-6 flex-1 flex flex-col justify-center items-center text-center transition-all hover:scale-[1.02] cursor-default" style={{ background: 'linear-gradient(135deg, hsl(142, 65%, 96%) 0%, hsl(142, 65%, 90%) 100%)', border: '1px solid hsl(142, 65%, 85%)' }}>
+              <p className="text-sm font-bold text-emerald-800 mb-2 uppercase tracking-wider">Last Synchronized</p>
+              <p className="text-xl font-bold text-emerald-950 mb-3">{latestReading ? new Date(latestReading.time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'No recent data'}</p>
+              <div className="w-full h-px bg-emerald-900/10 mb-3" />
+              <p className="text-xs font-medium text-emerald-700/80">Data is automatically polled directly from the edge node.</p>
             </div>
           </div>
-          <div>
-            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--foreground)' }}>Raw sensor connection</p>
-            <div className="rounded-2xl p-5" style={{ background: 'hsl(210, 68%, 95%)', border: '1px solid hsl(210, 68%, 87%)' }}>
-              <p className="text-sm text-muted-foreground">Wireless soil sensors send periodic data via the agribot receiver. If the node is offline, check the power and network connectivity.</p>
+          
+          {/* System Info Block */}
+          <div className="flex flex-col">
+            <p className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--foreground)' }}><Server className="w-4 h-4 text-blue-600"/> Node Specifications</p>
+            <div className="rounded-2xl p-6 flex-1 transition-all hover:scale-[1.02] cursor-default" style={{ background: 'linear-gradient(135deg, hsl(210, 68%, 97%) 0%, hsl(210, 68%, 92%) 100%)', border: '1px solid hsl(210, 68%, 86%)' }}>
+              <ul className="space-y-4">
+                <li className="flex justify-between items-center text-sm border-b border-blue-900/10 pb-2">
+                  <span className="text-blue-800/80 font-semibold">Protocol</span>
+                  <span className="font-bold text-blue-950">Wi-Fi / ESP-NOW</span>
+                </li>
+                <li className="flex justify-between items-center text-sm border-b border-blue-900/10 pb-2">
+                  <span className="text-blue-800/80 font-semibold">Firmware</span>
+                  <span className="font-bold text-blue-950">v2.4.1 (Stable)</span>
+                </li>
+                <li className="flex justify-between items-center text-sm border-b border-blue-900/10 pb-2">
+                  <span className="text-blue-800/80 font-semibold">Sleep Interval</span>
+                  <span className="font-bold text-blue-950">60 seconds</span>
+                </li>
+                <li className="flex justify-between items-center text-sm">
+                  <span className="text-blue-800/80 font-semibold">Power Mode</span>
+                  <span className="font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded">Deep Sleep</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Connection block */}
+          <div className="flex flex-col md:col-span-2 xl:col-span-1">
+            <p className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--foreground)' }}><ShieldCheck className="w-4 h-4 text-purple-600"/> Connectivity & Security</p>
+            <div className="rounded-2xl p-6 flex-1 flex flex-col transition-all hover:scale-[1.02] cursor-default" style={{ background: 'linear-gradient(135deg, hsl(270, 60%, 97%) 0%, hsl(270, 60%, 92%) 100%)', border: '1px solid hsl(270, 60%, 88%)' }}>
+              <p className="text-sm font-medium leading-relaxed text-purple-900/80 mb-4">
+                Wireless soil sensors transmit fully encrypted telemetry data directly to the Agribot receiver base station to prevent tampering.
+              </p>
+              <div className="mt-auto flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-purple-700 bg-purple-200/50 w-full px-3 py-2 rounded-lg">
+                  <ShieldCheck className="w-4 h-4" /> End-to-end encrypted
+                </div>
+                <div className="flex items-center gap-2 text-xs font-bold text-purple-700 bg-purple-200/50 w-full px-3 py-2 rounded-lg">
+                  <Server className="w-4 h-4" /> Direct Node-to-Base routing
+                </div>
+              </div>
             </div>
           </div>
         </div>

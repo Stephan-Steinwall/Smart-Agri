@@ -89,14 +89,44 @@ export default function AnalyzeDataPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    
+    // Fallback to local storage first for instant load
     try {
       const stored = window.localStorage.getItem('smart-agri-saved-analyses');
       if (stored) {
         setSavedAnalyses(JSON.parse(stored));
       }
     } catch {
-      // Ignore storage errors and continue with an empty list.
+      // Ignore storage errors
     }
+
+    // Fetch latest from backend database
+    axios.get(`${API_BASE}/telemetry/saved-analyses/${DEVICE_ID}`).then(res => {
+      if (res.data && Array.isArray(res.data)) {
+        const mapped = res.data.map((row: any) => ({
+          id: row.id,
+          label: row.label,
+          createdAt: row.saved_at || row.created_at,
+          soilMetrics: {
+            moisture: row.soil_moisture,
+            temperature: row.temperature,
+            ph: row.soil_ph,
+            conductivity: row.soil_conductivity,
+            nitrogen: row.nitrogen,
+            phosphorus: row.phosphorus,
+            potassium: row.potassium,
+            tds: row.tds,
+            salinity: row.salinity,
+          },
+          cropRecommendation: row.recommended_crop || 'No crop recommendation generated'
+        }));
+        setSavedAnalyses(mapped);
+        window.localStorage.setItem('smart-agri-saved-analyses', JSON.stringify(mapped));
+      }
+    }).catch(err => {
+      // eslint-disable-next-line no-console
+      console.warn("Failed to fetch saved analyses from DB", err);
+    });
   }, []);
 
   // Supabase realtime subscription: listen for new/updated sensor rows and refresh queries
@@ -208,15 +238,23 @@ export default function AnalyzeDataPage() {
     });
   }, [selectedAnalyses]);
 
-  const seriesColors = ['hsl(142, 65%, 38%)', 'hsl(210, 68%, 48%)'];
+  const seriesColors = [
+    'hsl(142, 65%, 38%)', 
+    'hsl(210, 68%, 48%)',
+    'hsl(280, 65%, 55%)',
+    'hsl(45, 90%, 45%)',
+    'hsl(20, 80%, 52%)',
+    'hsl(330, 65%, 50%)',
+    'hsl(190, 80%, 40%)',
+    'hsl(260, 65%, 45%)',
+    'hsl(208, 87%, 45%)',
+    'hsl(0, 80%, 55%)'
+  ];
 
   const handleToggleSelection = (id: string) => {
     setSelectedIds((current) => {
       if (current.includes(id)) {
         return current.filter((itemId) => itemId !== id);
-      }
-      if (current.length >= 2) {
-        return [current[1], id];
       }
       return [...current, id];
     });
@@ -316,6 +354,9 @@ export default function AnalyzeDataPage() {
 
         const nextItems = [entry, ...savedAnalyses];
         setSavedAnalyses(nextItems);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('smart-agri-saved-analyses', JSON.stringify(nextItems));
+        }
         // Refresh latest reading and history so UI reflects newly saved data immediately
         queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorLatest', DEVICE_ID] });
         queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID] });

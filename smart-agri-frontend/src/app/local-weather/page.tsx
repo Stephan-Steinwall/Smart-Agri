@@ -10,6 +10,7 @@ import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import WeatherWidget from '@/components/WeatherWidget';
@@ -73,6 +74,78 @@ function CustomTooltip({ active, payload, label }: any) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function LocalWeatherPage() {
+  const [coords, setCoords] = useState<{lat: number, lon: number}>({ lat: 19.0760, lon: 72.8777 });
+  const [locationName, setLocationName] = useState<string>("Mumbai, IN");
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [locationInput, setLocationInput] = useState("");
+  const [isLocating, setIsLocating] = useState(false);
+  const [isPredictionEnabled, setIsPredictionEnabled] = useState(true);
+
+  const handleTogglePrediction = async () => {
+    const newState = !isPredictionEnabled;
+    setIsPredictionEnabled(newState);
+    try {
+      await axios.post('http://localhost:3001/api/v1/ai/rain-prediction/esp32_weather_01/toggle', { enabled: newState });
+    } catch (e: any) {
+      console.error("Failed to toggle prediction", e);
+      alert("Failed to update database: " + e.message);
+      // Revert state on failure
+      setIsPredictionEnabled(!newState);
+    }
+  };
+
+  const handleLocationSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!locationInput.trim()) {
+      setIsEditingLocation(false);
+      return;
+    }
+    
+    setIsLocating(true);
+    try {
+      const res = await axios.get(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationInput)}&count=1&language=en&format=json`);
+      if (res.data && res.data.results && res.data.results.length > 0) {
+        const result = res.data.results[0];
+        setCoords({ lat: result.latitude, lon: result.longitude });
+        setLocationName(`${result.name}, ${result.country_code}`);
+      } else {
+        alert("Location not found. Please try another city name.");
+      }
+    } catch (error) {
+      console.error("Geocoding failed", error);
+    } finally {
+      setIsLocating(false);
+      setIsEditingLocation(false);
+    }
+  };
+
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const { latitude, longitude } = position.coords;
+        setCoords({ lat: latitude, lon: longitude });
+        try {
+          const res = await axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+          if (res.data && res.data.city) {
+            setLocationName(`${res.data.city}, ${res.data.countryCode}`);
+          }
+        } catch (e) {
+          // fallback silently
+        }
+      });
+    }
+  }, []);
+
+  const { data: aiPrediction, isLoading: aiLoading, isFetching: aiFetching } = useQuery({
+    queryKey: ['rainPrediction', coords.lat, coords.lon],
+    queryFn: async () => {
+      const res = await axios.get(`http://localhost:3001/api/v1/ai/rain-prediction/esp32_weather_01?lat=${coords.lat}&lon=${coords.lon}`);
+      return res.data;
+    },
+    enabled: isPredictionEnabled,
+    refetchInterval: 300000, // Refresh every 5 minutes
+  });
+
   const { data: dbHistory, isLoading } = useQuery({
     queryKey: ['environmentHistory'],
     queryFn: async () => {
@@ -164,6 +237,32 @@ export default function LocalWeatherPage() {
             <div className="flex items-center gap-2 mb-1">
               <CloudSun className="w-4 h-4 opacity-75" />
               <span className="text-sm opacity-75 font-medium">On-Site Weather Station</span>
+              <span className="text-sm opacity-50 px-1">•</span>
+              <Navigation className="w-3.5 h-3.5 opacity-75" />
+              {isEditingLocation ? (
+                <form onSubmit={handleLocationSubmit} className="flex items-center">
+                  <input
+                    type="text"
+                    value={locationInput}
+                    onChange={(e) => setLocationInput(e.target.value)}
+                    placeholder="Enter city..."
+                    className="text-sm bg-white/20 border border-white/30 rounded px-2 py-0.5 text-white placeholder-white/60 focus:outline-none focus:ring-1 focus:ring-white/50 w-32 md:w-40"
+                    autoFocus
+                    disabled={isLocating}
+                  />
+                </form>
+              ) : (
+                <span 
+                  className="text-sm opacity-75 font-medium cursor-pointer hover:opacity-100 hover:underline transition-all" 
+                  onClick={() => {
+                    setLocationInput(locationName.split(',')[0]);
+                    setIsEditingLocation(true);
+                  }}
+                  title="Click to edit location"
+                >
+                  {locationName}
+                </span>
+              )}
             </div>
             <h2 className="text-2xl md:text-3xl font-bold">Local Microclimate</h2>
             <p className="text-sm opacity-80 mt-1 max-w-xl">
@@ -188,6 +287,80 @@ export default function LocalWeatherPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── AI Rain Prediction ─────────────────────────────────────────────────── */}
+      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-50">
+              <CloudRain className="w-5 h-5 text-indigo-500" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-foreground">AI Rain Prediction</h3>
+              <p className="text-sm text-muted-foreground">Synthesized from regional forecast and local telemetry</p>
+            </div>
+          </div>
+          
+          <button 
+            disabled={aiFetching}
+            onClick={handleTogglePrediction}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${isPredictionEnabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-700'} ${aiFetching ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isPredictionEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
+        
+        {!isPredictionEnabled ? (
+          <div className="flex flex-col items-center justify-center py-6 text-muted-foreground bg-gray-50/50 dark:bg-white/5 rounded-xl border border-dashed border-gray-200 dark:border-white/10">
+            <CloudRain className="w-8 h-8 mb-2 opacity-20" />
+            <p className="font-medium">Prediction Disabled</p>
+            <p className="text-xs opacity-70">Turn it on to fetch the latest AI weather synthesis.</p>
+          </div>
+        ) : aiFetching && !aiPrediction ? (
+          <div className="flex items-center gap-3 text-muted-foreground animate-pulse">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm font-medium">Analyzing microclimate data...</span>
+          </div>
+        ) : aiPrediction ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+              <p className="font-medium text-indigo-900 text-sm md:text-base leading-relaxed">
+                "{aiPrediction.prediction}"
+              </p>
+              <div className="flex flex-col items-end pl-4 ml-4 border-l border-indigo-200">
+                <span className="text-2xl font-black text-indigo-600">{aiPrediction.confidence}%</span>
+                <span className="text-xs font-semibold text-indigo-400 uppercase tracking-widest">Confidence</span>
+              </div>
+            </div>
+
+            {(aiPrediction.expected_rainfall_mm !== undefined || aiPrediction.rain_intensity) && (
+              <div className="flex gap-6 mt-1 mb-1 px-2">
+                {aiPrediction.expected_rainfall_mm !== undefined && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Expected Rain</span>
+                    <span className="font-bold text-indigo-700">{aiPrediction.expected_rainfall_mm} mm</span>
+                  </div>
+                )}
+                {aiPrediction.rain_intensity && aiPrediction.rain_intensity !== "None" && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Intensity</span>
+                    <span className="font-bold text-indigo-700">{aiPrediction.rain_intensity}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {aiPrediction.reasoning && (
+              <p className="text-xs text-muted-foreground flex items-start gap-2">
+                <span className="font-semibold text-foreground">Reasoning:</span>
+                {aiPrediction.reasoning}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Unable to fetch AI prediction at this time.</p>
+        )}
       </div>
 
       {/* ── Comprehensive Grid Data ───────────────────────────────────────────── */}

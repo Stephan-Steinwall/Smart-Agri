@@ -186,6 +186,21 @@ export class TelemetryService {
     return data.reverse();
   }
 
+  async getSavedAnalyses(deviceId: string): Promise<any[]> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('Wireless sensor Soil Analysis data')
+      .select('*')
+      .eq('device_id', deviceId)
+      .order('saved_at', { ascending: false });
+
+    if (error) {
+      this.logger.error(`Error fetching saved analyses: ${error.message}`);
+      return [];
+    }
+    return data || [];
+  }
+
   // Save a user-labeled analysis into the Supabase table "Wireless sensor Soil Analysis data"
   async saveAnalysis(payload: any): Promise<any> {
     try {

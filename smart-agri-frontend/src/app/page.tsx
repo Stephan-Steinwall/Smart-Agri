@@ -160,7 +160,7 @@ export default function Dashboard() {
     queryKey: ['environmentLatest', DEVICE_ID],
     queryFn: async () => {
       try {
-        const res = await axios.get(`${API_BASE}/telemetry/environment/latest/${DEVICE_ID}`, { timeout: 3000 });
+        const res = await axios.get(`${API_BASE}/telemetry/environment/latest/esp32_weather_01`, { timeout: 3000 });
         return res.data;
       } catch (error) {
         return null;

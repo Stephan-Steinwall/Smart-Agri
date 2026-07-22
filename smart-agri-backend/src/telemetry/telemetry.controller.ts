@@ -25,6 +25,11 @@ export class TelemetryController {
     return this.telemetryService.getEnvironmentHistory(deviceId);
   }
 
+  @Get('saved-analyses/:deviceId')
+  async getSavedAnalyses(@Param('deviceId') deviceId: string) {
+    return this.telemetryService.getSavedAnalyses(deviceId);
+  }
+
   @Post('save-analysis')
   async saveAnalysis(@Body() body: any) {
     return this.telemetryService.saveAnalysis(body);
