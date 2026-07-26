@@ -60,4 +60,9 @@ export class AiController {
   ) {
     return this.aiService.toggleRainPrediction(deviceId, body.enabled);
   }
+
+  @Get('rain-prediction-status/:deviceId')
+  async getRainPredictionStatus(@Param('deviceId') deviceId: string) {
+    return this.aiService.getRainPredictionStatus(deviceId);
+  }
 }

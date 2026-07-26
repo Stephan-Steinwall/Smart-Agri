@@ -1,12 +1,14 @@
 // src/components/DashboardLayout.tsx
 'use client';
 
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
-  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun, FlaskConical
+  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun, FlaskConical, Sliders
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+import AccountManagement from './AccountManagement';
 
 type NavItem = {
   href?: string;
@@ -16,8 +18,8 @@ type NavItem = {
 };
 
 const navItems: NavItem[] = [
-  { href: '/',               icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/local-weather',  icon: CloudSun,         label: 'Local Weather' },
+  { href: '/dashboard',      icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/wireless-soil-sensor', icon: Wifi,        label: 'Wireless Soil Sensor' },
   { 
     icon: FlaskConical,     
     label: 'Data Analytics',
@@ -26,20 +28,77 @@ const navItems: NavItem[] = [
       { href: '/wireless-soil-sensor/analyze', label: 'Wireless Sensor Soil Analysis' }
     ]
   },
+  { href: '/local-weather',  icon: CloudSun,         label: 'Local Weather' },
+  { href: '/system-control', icon: Sliders,          label: 'System Control' },
   { href: '/ai-assistant',   icon: Bot,              label: 'AI Assistant' },
-  { href: '/wireless-soil-sensor', icon: Wifi,        label: 'Wireless Soil Sensor' },
 ];
 
 const pageTitles: Record<string, string> = {
-  '/':                  'Farm Overview',
+  '/dashboard':         'Farm Overview',
   '/local-weather':     'Local Weather Station',
   '/field-data-analysis': 'Field Data Analysis',
   '/ai-assistant':      'AI Assistant',
   '/wireless-soil-sensor': 'Wireless Soil Sensor',
+  '/system-control':    'System Control Center',
 };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
+  useEffect(() => {
+    if (pathname === '/' || pathname === '/login') {
+      setIsAuthorized(true);
+      return;
+    }
+
+    const checkSession = () => {
+      const stored = localStorage.getItem('userAccount');
+      if (!stored) {
+        setIsAuthorized(false);
+        router.replace('/login');
+        return;
+      }
+      try {
+        const user = JSON.parse(stored);
+        if (user.sessionExpiresAt && Date.now() > user.sessionExpiresAt) {
+          localStorage.removeItem('userAccount');
+          setIsAuthorized(false);
+          alert('Your session has expired for security reasons. Please log in again.');
+          router.replace('/login');
+          return;
+        }
+        setIsAuthorized(true);
+      } catch (err) {
+        localStorage.removeItem('userAccount');
+        setIsAuthorized(false);
+        router.replace('/login');
+      }
+    };
+
+    checkSession();
+    const interval = setInterval(checkSession, 60000); // Verify session validity every minute
+    return () => clearInterval(interval);
+  }, [pathname, router]);
+
+  // Bypass dashboard layout for the welcome page and login page
+  if (pathname === '/' || pathname === '/login') {
+    return <>{children}</>;
+  }
+
+  // Prevent rendering protected content until session verification passes
+  if (!isAuthorized) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-slate-950 text-white font-sans">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-sm text-slate-400 font-medium">Verifying session security...</p>
+        </div>
+      </div>
+    );
+  }
+
   const pageTitle = pageTitles[pathname] ?? 'SmartAgri';
 
   return (
@@ -59,17 +118,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           style={{ borderBottom: '1px solid var(--sidebar-border)' }}
         >
           <div
-            className="flex items-center justify-center w-9 h-9 rounded-xl mr-3 flex-shrink-0"
-            style={{ background: 'hsl(142, 65%, 28%)' }}
+            className="flex items-center justify-center w-10 h-10 rounded-xl mr-3 flex-shrink-0 overflow-hidden bg-white"
           >
-            <Sprout className="w-5 h-5" style={{ color: 'white' }} />
+            <img src="/logo.jpg" alt="AgriBot Logo" className="w-full h-full object-contain p-0.5" />
           </div>
-          <div>
-            <span className="font-bold text-base leading-none" style={{ color: 'hsl(140, 15%, 92%)' }}>
-              SmartAgri
+          <div className="flex flex-col overflow-hidden">
+            <span className="font-bold text-base leading-none truncate" style={{ color: 'hsl(140, 15%, 92%)' }}>
+              AgriBot
             </span>
-            <p className="text-[10px] mt-0.5 font-medium tracking-widest uppercase" style={{ color: 'var(--sidebar-foreground)' }}>
-              AI Platform
+            <p className="text-[10px] mt-1 font-medium uppercase truncate" style={{ color: 'var(--sidebar-foreground)' }}>
+              Smart Agriculture System
             </p>
           </div>
         </div>
@@ -231,18 +289,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Right: Controls */}
           <div className="flex items-center gap-3">
             <NotificationBell />
-            {/* Avatar */}
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 cursor-pointer transition-opacity hover:opacity-90"
-              style={{
-                background: 'linear-gradient(135deg, hsl(142, 65%, 28%), hsl(162, 55%, 40%))',
-                color: 'white',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              }}
-              title="Farmer Profile"
-            >
-              F
-            </div>
+            {/* Account Management Modal Trigger & Dialog */}
+            <AccountManagement />
           </div>
         </header>
 

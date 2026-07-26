@@ -8,32 +8,12 @@ import { ArrowLeft, Activity, Battery, Beaker, CheckCircle2, Droplets, FlaskConi
 import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, ComposedChart } from 'recharts';
 
 const API_BASE = 'http://localhost:3001/api/v1';
-const DEVICE_ID = 'agribot_receiver_01';
+const DEVICE_ID = 'esp32_weather_01';
 const DEVICE_NAME = 'Main Field Node';
 
-const TEST_DATA = Array.from({ length: 24 }).map((_, i) => {
-  const time = new Date();
-  time.setHours(time.getHours() - (23 - i));
-  return {
-    time: time.toISOString(),
-    moisture: 45 + Math.sin(i / 2) * 10 + Math.random() * 5,
-    temperature: 22 + Math.cos(i / 3) * 5 + Math.random() * 2,
-    ph: 6.5 + Math.random() * 0.4,
-    conductivity: 1.2 + Math.random() * 0.3,
-    nitrogen: 40 + Math.random() * 10,
-    phosphorus: 25 + Math.random() * 5,
-    potassium: 35 + Math.random() * 8,
-  };
-});
 
-const dosingChartData = [
-  { date: 'Jul 15', water: 10, nitrogen: 300, phosphorus: 150, potassium: 250 },
-  { date: 'Jul 16', water: 15, nitrogen: 400, phosphorus: 180, potassium: 310 },
-  { date: 'Jul 17', water: 12, nitrogen: 450, phosphorus: 210, potassium: 330 },
-  { date: 'Jul 18', water: 0, nitrogen: 0, phosphorus: 0, potassium: 0 },
-  { date: 'Jul 19', water: 10.5, nitrogen: 380, phosphorus: 190, potassium: 290 },
-  { date: 'Jul 20', water: 12.5, nitrogen: 450, phosphorus: 200, potassium: 350 },
-];
+
+
 
 type SoilMetrics = {
   moisture: number | null;
@@ -57,15 +37,15 @@ type SavedAnalysis = {
 
 function SensorCard({ icon: Icon, label, value, unit, color, bgColor }: { icon: React.ElementType; label: string; value: string | number; unit?: string; color: string; bgColor: string; }) {
   return (
-    <div className="rounded-2xl p-4 flex items-center gap-4 card-lift animate-fade-in min-w-0 overflow-hidden" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
-      <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: bgColor }}>
-        <Icon className="w-5 h-5" style={{ color }} />
+    <div className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in min-w-0 overflow-hidden">
+      <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center flex-shrink-0" style={{ background: bgColor }}>
+        <Icon className="w-6 h-6" style={{ color }} />
       </div>
       <div className="min-w-0">
-        <p className="text-xs font-medium uppercase tracking-wide break-words" style={{ color: 'var(--muted-foreground)' }}>{label}</p>
-        <p className="text-lg font-bold mt-0.5 break-words" style={{ color: 'var(--foreground)' }}>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5 break-words">{label}</p>
+        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight break-words">
           {value}
-          {unit ? <span className="text-sm font-medium ml-0.5" style={{ color: 'var(--muted-foreground)' }}>{unit}</span> : null}
+          {unit ? <span className="text-sm font-medium ml-1 text-slate-400">{unit}</span> : null}
         </p>
       </div>
     </div>
@@ -115,43 +95,120 @@ export default function SoilAnalysisPage() {
   const [saveToastVisible, setSaveToastVisible] = useState(false);
   const [saveToastText, setSaveToastText] = useState('Analysis saved successfully.');
 
-  const queryClient = useQueryClient();
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [historySortField, setHistorySortField] = useState<string>('time');
+  const [historySortOrder, setHistorySortOrder] = useState<'asc' | 'desc'>('desc');
 
-  const { data: latestReadingData, isLoading: isLatestLoading, isError: isLatestError } = useQuery({
-    queryKey: ['wirelessSoilSensorLatest', DEVICE_ID],
-    queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/latest/${DEVICE_ID}`);
-      return res.data;
-    },
-    refetchInterval: 10000,
-  });
+  const queryClient = useQueryClient();
 
   const { data: history, isLoading: isHistoryLoading, isError: isHistoryError } = useQuery({
     queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/history/${DEVICE_ID}`);
+      const res = await axios.get(`${API_BASE}/telemetry/dashboard-history/${DEVICE_ID}`);
+      return res.data;
+    },
+    refetchInterval: 5000,
+  });
+
+  const latestReading = history?.[history.length - 1];
+
+  const filteredAndSortedHistory = useMemo(() => {
+    if (!history) return [];
+    let result = [...history];
+
+    if (historySearchQuery) {
+      const q = historySearchQuery.toLowerCase();
+      result = result.filter(item => {
+        const timeStr = new Date(item.time || item.timestamp).toLocaleString().toLowerCase();
+        return timeStr.includes(q);
+      });
+    }
+
+    result.sort((a, b) => {
+      let valA = a[historySortField];
+      let valB = b[historySortField];
+      
+      if (historySortField === 'time') {
+        valA = new Date(a.time || a.timestamp).getTime();
+        valB = new Date(b.time || b.timestamp).getTime();
+      }
+
+      if (valA < valB) return historySortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return historySortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return result;
+  }, [history, historySearchQuery, historySortField, historySortOrder]);
+
+  const getRelativeTime = (isoString: string | null) => {
+    if (!isoString) return 'Never';
+    const diff = Date.now() - new Date(isoString).getTime();
+    if (diff < 0) return 'Just now';
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hr ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} days ago`;
+  };
+
+  const { data: pumpLogs, isLoading: isPumpLogsLoading } = useQuery({
+    queryKey: ['pumpLogs', DEVICE_ID],
+    queryFn: async () => {
+      const res = await axios.get(`${API_BASE}/telemetry/pump-logs/${DEVICE_ID}`);
       return res.data;
     },
     refetchInterval: 10000,
   });
 
-  const latestReading = latestReadingData ?? history?.[history.length - 1];
+  const { latestDosing, aggregatedDosingChartData } = useMemo(() => {
+    const latest: any = { water: null, nitrogen: null, phosphorus: null, potassium: null };
+    if (!pumpLogs || pumpLogs.length === 0) {
+      return { latestDosing: latest, aggregatedDosingChartData: [] };
+    }
+
+    const dailyData: Record<string, any> = {};
+    
+    // pumpLogs is newest first.
+    pumpLogs.forEach((log: any) => {
+      if (log.status === 'completed' && log.duration_seconds != null) {
+        if (!latest[log.pump_name]) {
+          latest[log.pump_name] = log;
+        }
+      }
+
+      if (log.start_time && log.duration_seconds != null) {
+        const dateStr = new Date(log.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        if (!dailyData[dateStr]) {
+          dailyData[dateStr] = { date: dateStr, water: 0, nitrogen: 0, phosphorus: 0, potassium: 0 };
+        }
+        dailyData[dateStr][log.pump_name] += log.duration_seconds;
+      }
+    });
+
+    // We want the chart to go oldest to newest (left to right)
+    const aggArray = Object.values(dailyData).reverse();
+
+    return { latestDosing: latest, aggregatedDosingChartData: aggArray };
+  }, [pumpLogs]);
 
   const chartData = useMemo(() => {
-    if (!history || history.length === 0) return TEST_DATA;
+    if (!history || history.length === 0) return [];
     return history.map((row: any) => ({
-      time: row.timestamp,
+      time: row.time || row.timestamp,
       nitrogen: row.nitrogen,
       phosphorus: row.phosphorus,
       potassium: row.potassium,
       moisture: row.moisture,
       temperature: row.temperature,
       ph: row.ph,
-      conductivity: row.soilConductivity ?? row.electricalConductivity
+      conductivity: row.electricalConductivity ?? row.soilConductivity
     }));
   }, [history]);
   
-  const connectivity = isLatestError || isHistoryError ? 'Disconnected' : isLatestLoading || isHistoryLoading ? 'Checking...' : latestReading?.sensorStatus ?? 'Connected';
+  const connectivity = isHistoryError ? 'Disconnected' : isHistoryLoading ? 'Checking...' : latestReading?.sensorStatus ?? 'Connected';
   const statusColor = connectivity === 'Connected' ? 'hsl(142, 65%, 40%)' : connectivity === 'Checking...' ? 'hsl(210, 68%, 48%)' : 'hsl(4, 80%, 55%)';
 
   useEffect(() => {
@@ -189,15 +246,10 @@ export default function SoilAnalysisPage() {
         channel = supabase.channel('realtime-wireless-soil');
 
         const handleChange = () => {
-          queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorLatest', DEVICE_ID] });
           queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID] });
         };
 
-        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'latest_soil_reading', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
-          handleChange();
-        });
-
-        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'soil_readings', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
+        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'soil_sensor_readings', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
           handleChange();
         });
 
@@ -242,7 +294,10 @@ export default function SoilAnalysisPage() {
     return '—';
   }, [latestReading]);
 
-  const selectedAnalyses = useMemo(() => savedAnalyses.filter((item) => selectedIds.includes(item.id)), [savedAnalyses, selectedIds]);
+  const selectedAnalyses = useMemo(() => {
+    if (!history) return [];
+    return history.filter((item: any) => selectedIds.includes(item.id));
+  }, [history, selectedIds]);
 
   const nutrientChartData = useMemo<Array<Record<string, number | string | null>>>(() => {
     const metricNames = ['nitrogen', 'phosphorus', 'potassium'] as const;
@@ -252,8 +307,8 @@ export default function SoilAnalysisPage() {
       const base: Record<string, number | string | null> = {
         metric: metric === 'nitrogen' ? 'Nitrogen' : metric === 'phosphorus' ? 'Phosphorus' : 'Potassium',
       };
-      selectedAnalyses.forEach((item, index) => {
-        base[`record${index}`] = item.soilMetrics[metric] ?? null;
+      selectedAnalyses.forEach((item: any, index: number) => {
+        base[`record${index}`] = item[metric] ?? null;
       });
       return base;
     });
@@ -268,8 +323,8 @@ export default function SoilAnalysisPage() {
       const base: Record<string, number | string | null> = {
         metric: label,
       };
-      selectedAnalyses.forEach((item, index) => {
-        base[`record${index}`] = item.soilMetrics[metric] ?? null;
+      selectedAnalyses.forEach((item: any, index: number) => {
+        base[`record${index}`] = item[metric] ?? null;
       });
       return base;
     });
@@ -529,42 +584,47 @@ export default function SoilAnalysisPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
             <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><Droplets className="w-3 h-3"/> Water</p>
-            <p className="text-sm font-bold">2 hours ago</p>
-            <p className="text-xs text-blue-500 mt-1 font-medium">12.5 Liters</p>
+            <p className="text-sm font-bold">{getRelativeTime(latestDosing.water?.end_time)}</p>
+            <p className="text-xs text-blue-500 mt-1 font-medium">{latestDosing.water?.duration_seconds ? `${latestDosing.water.duration_seconds}s duration` : 'No data'}</p>
           </div>
           <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
             <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><FlaskConical className="w-3 h-3"/> Nitrogen</p>
-            <p className="text-sm font-bold">Yesterday, 4:30 PM</p>
-            <p className="text-xs text-purple-500 mt-1 font-medium">450 ml</p>
+            <p className="text-sm font-bold">{getRelativeTime(latestDosing.nitrogen?.end_time)}</p>
+            <p className="text-xs text-purple-500 mt-1 font-medium">{latestDosing.nitrogen?.duration_seconds ? `${latestDosing.nitrogen.duration_seconds}s duration` : 'No data'}</p>
           </div>
           <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
             <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><FlaskConical className="w-3 h-3"/> Phosphorus</p>
-            <p className="text-sm font-bold">3 days ago</p>
-            <p className="text-xs text-pink-500 mt-1 font-medium">200 ml</p>
+            <p className="text-sm font-bold">{getRelativeTime(latestDosing.phosphorus?.end_time)}</p>
+            <p className="text-xs text-pink-500 mt-1 font-medium">{latestDosing.phosphorus?.duration_seconds ? `${latestDosing.phosphorus.duration_seconds}s duration` : 'No data'}</p>
           </div>
           <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
             <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><FlaskConical className="w-3 h-3"/> Potassium</p>
-            <p className="text-sm font-bold">3 days ago</p>
-            <p className="text-xs text-yellow-600 mt-1 font-medium">350 ml</p>
+            <p className="text-sm font-bold">{getRelativeTime(latestDosing.potassium?.end_time)}</p>
+            <p className="text-xs text-yellow-600 mt-1 font-medium">{latestDosing.potassium?.duration_seconds ? `${latestDosing.potassium.duration_seconds}s duration` : 'No data'}</p>
           </div>
         </div>
 
         <div className="mt-6 rounded-2xl p-6 animate-fade-in card-lift" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
-          <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Weekly Dosing Trends</h4>
+          <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Weekly Dosing Trends (Seconds per day)</h4>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={dosingChartData} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
-                <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="hsl(120, 14%, 92%)" />
-                <XAxis dataKey="date" stroke="transparent" tick={{ fill: 'hsl(140, 10%, 50%)', fontSize: 11 }} />
-                <YAxis yAxisId="left" stroke="transparent" tick={{ fill: 'hsl(140, 10%, 50%)', fontSize: 11 }} />
-                <YAxis yAxisId="right" orientation="right" stroke="transparent" tick={{ fill: 'hsl(140, 10%, 50%)', fontSize: 11 }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                <Bar yAxisId="left" dataKey="nitrogen" name="Nitrogen (ml)" fill="hsl(142, 65%, 40%)" radius={[4, 4, 0, 0]} />
-                <Bar yAxisId="left" dataKey="phosphorus" name="Phosphorus (ml)" fill="hsl(330, 65%, 50%)" radius={[4, 4, 0, 0]} />
-                <Bar yAxisId="left" dataKey="potassium" name="Potassium (ml)" fill="hsl(190, 80%, 40%)" radius={[4, 4, 0, 0]} />
-                <Line yAxisId="right" type="monotone" dataKey="water" name="Water (L)" stroke="hsl(210, 80%, 50%)" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-              </ComposedChart>
+              {aggregatedDosingChartData.length > 0 ? (
+                <ComposedChart data={aggregatedDosingChartData} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
+                  <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="hsl(120, 14%, 92%)" />
+                  <XAxis dataKey="date" stroke="transparent" tick={{ fill: 'hsl(140, 10%, 50%)', fontSize: 11 }} />
+                  <YAxis yAxisId="left" stroke="transparent" tick={{ fill: 'hsl(140, 10%, 50%)', fontSize: 11 }} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                  <Bar yAxisId="left" dataKey="nitrogen" name="Nitrogen (s)" fill="hsl(270, 60%, 60%)" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="left" dataKey="phosphorus" name="Phosphorus (s)" fill="hsl(330, 65%, 50%)" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="left" dataKey="potassium" name="Potassium (s)" fill="hsl(40, 90%, 50%)" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="left" dataKey="water" name="Water (s)" fill="hsl(210, 80%, 50%)" radius={[4, 4, 0, 0]} />
+                </ComposedChart>
+              ) : (
+                <div className="flex items-center justify-center h-full text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                  No dosing history available yet.
+                </div>
+              )}
             </ResponsiveContainer>
           </div>
         </div>
@@ -618,7 +678,7 @@ export default function SoilAnalysisPage() {
 
           {/* Moisture & Temp Chart */}
           <div className="rounded-2xl p-6 animate-fade-in card-lift" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
-            <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Environment (Moisture & Temp)</h4>
+            <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Soil Moisture and Temperature</h4>
             {isHistoryLoading ? (
               <div className="h-64 flex items-center justify-center"><span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" /></div>
             ) : chartData && chartData.length > 0 ? (
@@ -692,12 +752,12 @@ export default function SoilAnalysisPage() {
                     <YAxis tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} />
                     <Tooltip formatter={(value: any) => value ?? '—'} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
-                    {selectedAnalyses.map((item, index) => (
+                    {selectedAnalyses.map((item: any, index: number) => (
                       <Line
                         key={item.id}
                         type="monotone"
                         dataKey={`record${index}`}
-                        name={item.label}
+                        name={new Date(item.time || item.timestamp).toLocaleTimeString()}
                         stroke={seriesColors[index]}
                         strokeWidth={2.5}
                         dot={{ r: 4 }}
@@ -718,12 +778,12 @@ export default function SoilAnalysisPage() {
                     <YAxis tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} />
                     <Tooltip formatter={(value: any) => value ?? '—'} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
-                    {selectedAnalyses.map((item, index) => (
+                    {selectedAnalyses.map((item: any, index: number) => (
                       <Line
                         key={item.id}
                         type="monotone"
                         dataKey={`record${index}`}
-                        name={item.label}
+                        name={new Date(item.time || item.timestamp).toLocaleTimeString()}
                         stroke={seriesColors[index]}
                         strokeWidth={2.5}
                         dot={{ r: 4 }}
@@ -739,33 +799,53 @@ export default function SoilAnalysisPage() {
       </section>
 
       <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between gap-3 mb-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
           <div>
-            <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Saved Analyses</h2>
+            <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Recent Sensor Readings</h2>
             <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
-              Previously saved soil and crop recommendation records appear here.
+              Live continuous telemetry from the soil_sensor_readings database table.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={async (e) => { e.stopPropagation(); if (selectedIds.length === 0) return; if (!confirm(`Delete ${selectedIds.length} selected analysis?`)) return; await handleDeleteSelected(); }}
-              disabled={selectedIds.length === 0}
-              className="rounded-xl px-3 py-2 text-sm font-semibold transition disabled:opacity-50 bg-red-600 text-white"
+          <div className="flex flex-wrap items-center gap-2">
+            <input 
+              type="text" 
+              placeholder="Search by date/time..." 
+              value={historySearchQuery}
+              onChange={(e) => setHistorySearchQuery(e.target.value)}
+              className="px-3 py-1.5 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-green-500/50"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+            />
+            <select
+              value={historySortField}
+              onChange={(e) => setHistorySortField(e.target.value)}
+              className="px-3 py-1.5 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-green-500/50"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
             >
-              Delete Selected
+              <option value="time">Sort by Date</option>
+              <option value="moisture">Sort by Moisture</option>
+              <option value="ph">Sort by pH</option>
+              <option value="nitrogen">Sort by Nitrogen (N)</option>
+              <option value="phosphorus">Sort by Phosphorus (P)</option>
+              <option value="potassium">Sort by Potassium (K)</option>
+            </select>
+            <button
+              onClick={() => setHistorySortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+              className="px-3 py-1.5 text-sm rounded-lg border hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+            >
+              {historySortOrder === 'asc' ? 'Low to High ↑' : 'High to Low ↓'}
             </button>
           </div>
         </div>
 
-        {savedAnalyses.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>No saved analyses yet.</p>
+        {!history || history.length === 0 ? (
+          <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>No sensor readings available yet.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-auto max-h-[400px] border border-slate-200/50 dark:border-slate-800/50 rounded-lg">
             <table className="w-full text-sm">
-              <thead>
-                <tr style={{ color: 'var(--muted-foreground)' }}>
-                  <th className="px-3 py-2 text-left">Label</th>
-                  <th className="px-3 py-2 text-left">Saved</th>
+              <thead className="sticky top-0 z-10 shadow-sm" style={{ background: 'var(--card)', color: 'var(--muted-foreground)' }}>
+                <tr>
+                  <th className="px-3 py-2 text-left">Record Time & Date</th>
                   <th className="px-3 py-2 text-left">Soil Moisture</th>
                   <th className="px-3 py-2 text-left">Temperature</th>
                   <th className="px-3 py-2 text-left">Soil pH</th>
@@ -778,29 +858,27 @@ export default function SoilAnalysisPage() {
                 </tr>
               </thead>
               <tbody>
-                {savedAnalyses.map((item) => {
-                  const isSelected = selectedIds.includes(item.id);
+                {filteredAndSortedHistory.map((item: any, idx: number) => {
                   return (
                     <tr
-                      key={item.id}
+                      key={item.id || idx}
                       onClick={() => handleToggleSelection(item.id)}
-                      className="transition-colors duration-150 cursor-pointer"
+                      className="transition-colors duration-150 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
                       style={{
                         borderTop: '1px solid var(--border)',
-                        background: isSelected ? 'hsl(142, 65%, 93%)' : 'transparent',
+                        background: selectedIds.includes(item.id) ? 'hsl(142, 65%, 93%)' : 'transparent',
                       }}
                     >
-                      <td className="px-3 py-3 font-semibold" style={{ color: 'var(--foreground)' }}>{item.label}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{new Date(item.createdAt).toLocaleString()}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.moisture)}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.temperature)}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.ph)}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.conductivity)}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.nitrogen)}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.phosphorus)}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.potassium)}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.tds)}</td>
-                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.salinity)}</td>
+                      <td className="px-3 py-3 font-semibold" style={{ color: 'var(--foreground)' }}>{new Date(item.time || item.timestamp).toLocaleString()}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.moisture)}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.temperature)}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.ph)}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.electricalConductivity ?? item.soilConductivity)}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.nitrogen)}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.phosphorus)}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.potassium)}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.tds)}</td>
+                      <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.salinity)}</td>
                     </tr>
                   );
                 })}

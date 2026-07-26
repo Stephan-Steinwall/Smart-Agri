@@ -841,6 +841,20 @@ Do not add any extra commentary or fields.`;
     }
     return { success: true, enabled };
   }
+
+  async getRainPredictionStatus(deviceId: string) {
+    const { data, error } = await this.supabaseService.getClient()
+      .from('rain_predictions')
+      .select('will_rain')
+      .eq('device_id', deviceId)
+      .single();
+      
+    if (error && error.code !== 'PGRST116') {
+      this.logger.error(`Error fetching prediction status for ${deviceId}: ${error.message}`);
+    }
+    
+    return { will_rain: data?.will_rain ?? false };
+  }
 }
 
 

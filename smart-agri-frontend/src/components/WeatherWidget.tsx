@@ -1,13 +1,10 @@
 // src/components/WeatherWidget.tsx
 "use client";
 
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { Cloud, Sun, CloudRain, Wind, Thermometer, CloudSnow, CloudLightning, Loader2, MapPin } from 'lucide-react';
-
-// Default coordinates (e.g., Central Valley, CA)
-const LATITUDE = 36.73;
-const LONGITUDE = -119.78;
 
 // Maps WMO Weather codes to Lucide icons
 const getWeatherIcon = (code: number, isDay: number) => {
@@ -35,11 +32,65 @@ const getWeatherText = (code: number) => {
 };
 
 export default function WeatherWidget() {
+  const [coords, setCoords] = useState({ lat: 6.9271, lon: 79.8612 }); // Colombo / Sri Lanka default
+  const [locationName, setLocationName] = useState("Locating...");
+
+  useEffect(() => {
+    // 1. Try browser Geolocation first (GPS/high accuracy)
+    if (typeof window !== 'undefined' && "geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          setCoords({ lat: latitude, lon: longitude });
+          try {
+            const res = await axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+            if (res.data) {
+              const city = res.data.city || res.data.locality || res.data.principalSubdivision;
+              const country = res.data.countryCode;
+              if (city && country) {
+                setLocationName(`${city}, ${country}`);
+              } else if (city) {
+                setLocationName(city);
+              } else {
+                setLocationName("Live GPS Location");
+              }
+            }
+          } catch (e) {
+            setLocationName("Live GPS Location");
+          }
+        },
+        async () => {
+          // 2. If geolocation permission is denied or fails, fallback to IP Geolocation
+          try {
+            const ipRes = await axios.get("https://freeipapi.com/api/json/");
+            if (ipRes.data && ipRes.data.latitude && ipRes.data.longitude) {
+              setCoords({ lat: ipRes.data.latitude, lon: ipRes.data.longitude });
+              const city = ipRes.data.cityName || ipRes.data.regionName;
+              const country = ipRes.data.countryCode;
+              if (city && country) {
+                setLocationName(`${city}, ${country}`);
+              } else {
+                setLocationName("Live IP Location");
+              }
+            } else {
+              setLocationName("Colombo, LK");
+            }
+          } catch (ipErr) {
+            setLocationName("Colombo, LK");
+          }
+        },
+        { timeout: 8000, enableHighAccuracy: true }
+      );
+    } else {
+      setLocationName("Colombo, LK");
+    }
+  }, []);
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['currentWeather', LATITUDE, LONGITUDE],
+    queryKey: ['currentWeather', coords.lat, coords.lon],
     queryFn: async () => {
       const res = await axios.get(
-        `https://api.open-meteo.com/v1/forecast?latitude=${LATITUDE}&longitude=${LONGITUDE}&current_weather=true`
+        `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current_weather=true`
       );
       return res.data.current_weather;
     },
@@ -83,8 +134,8 @@ export default function WeatherWidget() {
           <span>{windspeed} km/h wind</span>
         </div>
         <div className="flex items-center gap-2 text-xs opacity-90 font-medium">
-          <MapPin className="w-3.5 h-3.5" />
-          <span>Central Valley</span>
+          <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span className="font-semibold truncate max-w-[140px]" title={locationName}>{locationName}</span>
         </div>
       </div>
     </div>

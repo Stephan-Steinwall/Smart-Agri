@@ -164,8 +164,7 @@ export default function AiAssistant() {
       
       {/* ── Sidebar (Sessions List) ────────────────────────────────────────── */}
       <div 
-        className="hidden md:flex flex-col w-72 rounded-2xl overflow-hidden flex-shrink-0"
-        style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}
+        className="hidden md:flex flex-col w-72 rounded-[1.5rem] overflow-hidden flex-shrink-0 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"
       >
         <div className="p-4" style={{ borderBottom: '1px solid var(--border)' }}>
           <button
@@ -208,12 +207,12 @@ export default function AiAssistant() {
       </div>
 
       {/* ── Main Chat Area ────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0" style={{ border: '1px solid var(--border)', borderRadius: '1rem', background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
+      <div className="flex-1 flex flex-col min-w-0 rounded-[1.5rem] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         
         {/* Chat header */}
         <div
-          className="flex items-center justify-between px-6 py-4 rounded-t-2xl flex-shrink-0"
-          style={{ background: 'linear-gradient(135deg, hsl(142, 58%, 22%) 0%, hsl(162, 50%, 28%) 100%)' }}
+          className="flex items-center justify-between px-6 py-4 rounded-t-[1.5rem] flex-shrink-0"
+          style={{ background: 'linear-gradient(135deg, #064e3b 0%, #047857 55%, #0f766e 100%)' }}
         >
           <div className="flex items-center gap-3">
             <div

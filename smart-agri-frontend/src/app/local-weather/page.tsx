@@ -25,19 +25,18 @@ function StatCard({
 }) {
   return (
     <div
-      className="rounded-2xl p-4 flex items-center gap-4 card-lift animate-fade-in"
-      style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}
+      className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in min-w-0 overflow-hidden"
     >
       <div
-        className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+        className="w-12 h-12 rounded-[1rem] flex items-center justify-center flex-shrink-0"
         style={{ background: bgColor }}
       >
-        <Icon className="w-5 h-5" style={{ color }} />
+        <Icon className="w-6 h-6" style={{ color }} />
       </div>
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>{label}</p>
-        <p className="text-base font-bold mt-0.5" style={{ color: 'var(--foreground)' }}>
-          {value}<span className="text-xs font-semibold ml-1" style={{ color: 'var(--muted-foreground)' }}>{unit}</span>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5 break-words">{label}</p>
+        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight break-words">
+          {value}<span className="text-sm font-medium ml-1 text-slate-400">{unit}</span>
         </p>
       </div>
     </div>
@@ -74,8 +73,8 @@ function CustomTooltip({ active, payload, label }: any) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function LocalWeatherPage() {
-  const [coords, setCoords] = useState<{lat: number, lon: number}>({ lat: 19.0760, lon: 72.8777 });
-  const [locationName, setLocationName] = useState<string>("Mumbai, IN");
+  const [coords, setCoords] = useState<{lat: number, lon: number}>({ lat: 6.9271, lon: 79.8612 });
+  const [locationName, setLocationName] = useState<string>("Locating...");
   const [isEditingLocation, setIsEditingLocation] = useState(false);
   const [locationInput, setLocationInput] = useState("");
   const [isLocating, setIsLocating] = useState(false);
@@ -121,18 +120,50 @@ export default function LocalWeatherPage() {
 
   useEffect(() => {
     if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(async (position) => {
-        const { latitude, longitude } = position.coords;
-        setCoords({ lat: latitude, lon: longitude });
-        try {
-          const res = await axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
-          if (res.data && res.data.city) {
-            setLocationName(`${res.data.city}, ${res.data.countryCode}`);
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          setCoords({ lat: latitude, lon: longitude });
+          try {
+            const res = await axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+            if (res.data) {
+              const city = res.data.city || res.data.locality || res.data.principalSubdivision;
+              const country = res.data.countryCode;
+              if (city && country) {
+                setLocationName(`${city}, ${country}`);
+              } else if (city) {
+                setLocationName(city);
+              } else {
+                setLocationName("Live GPS Location");
+              }
+            }
+          } catch (e) {
+            setLocationName("Live GPS Location");
           }
-        } catch (e) {
-          // fallback silently
-        }
-      });
+        },
+        async () => {
+          try {
+            const ipRes = await axios.get("https://freeipapi.com/api/json/");
+            if (ipRes.data && ipRes.data.latitude && ipRes.data.longitude) {
+              setCoords({ lat: ipRes.data.latitude, lon: ipRes.data.longitude });
+              const city = ipRes.data.cityName || ipRes.data.regionName;
+              const country = ipRes.data.countryCode;
+              if (city && country) {
+                setLocationName(`${city}, ${country}`);
+              } else {
+                setLocationName("Live IP Location");
+              }
+            } else {
+              setLocationName("Colombo, LK");
+            }
+          } catch (ipErr) {
+            setLocationName("Colombo, LK");
+          }
+        },
+        { timeout: 8000, enableHighAccuracy: true }
+      );
+    } else {
+      setLocationName("Colombo, LK");
     }
   }, []);
 
@@ -448,7 +479,7 @@ export default function LocalWeatherPage() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           
           {/* 1. Thermodynamics (Temp, Soil Temp, Dew Point) */}
-          <div className="rounded-2xl p-6 animate-fade-in card-lift" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+          <div className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
             <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Thermodynamics & Condensation Risk</h4>
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={history} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
@@ -465,7 +496,7 @@ export default function LocalWeatherPage() {
           </div>
 
           {/* 2. Hydration & Wind */}
-          <div className="rounded-2xl p-6 animate-fade-in card-lift" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+          <div className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
             <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Hydration & Wind Forces</h4>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={history} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
@@ -489,7 +520,7 @@ export default function LocalWeatherPage() {
           </div>
 
           {/* 3. Solar Energy (Full Width) */}
-          <div className="rounded-2xl p-6 animate-fade-in card-lift xl:col-span-2" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+          <div className="rounded-[1.5rem] p-6 animate-fade-in xl:col-span-2 transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
             <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Solar Energy & Light Condition</h4>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={history} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
@@ -526,7 +557,7 @@ export default function LocalWeatherPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border overflow-hidden" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
+        <div className="rounded-[1.5rem] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-sm text-left">
               <thead className="text-xs uppercase sticky top-0 z-10" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>
