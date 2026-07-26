@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { join } from 'path';
 
+import { ScheduleModule } from '@nestjs/schedule';
+
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { AiModule } from './ai/ai.module';
 import { SupabaseModule } from './supabase/supabase.module';
@@ -10,8 +12,9 @@ import { SupabaseModule } from './supabase/supabase.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [join(__dirname, '..', '.env')],
+      envFilePath: [join(process.cwd(), '.env')],
     }),
+    ScheduleModule.forRoot(),
     SupabaseModule,
     TelemetryModule,
     AiModule,

@@ -10,12 +10,12 @@ import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import WeatherWidget from '@/components/WeatherWidget';
 
 // (No mock data fallback - real data only)
-
 // ── Stat mini-card ─────────────────────────────────────────────────────────
 function StatCard({
   icon: Icon, label, value, unit, color, bgColor
@@ -25,19 +25,18 @@ function StatCard({
 }) {
   return (
     <div
-      className="rounded-2xl p-4 flex items-center gap-4 card-lift animate-fade-in"
-      style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}
+      className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in min-w-0 overflow-hidden"
     >
       <div
-        className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+        className="w-12 h-12 rounded-[1rem] flex items-center justify-center flex-shrink-0"
         style={{ background: bgColor }}
       >
-        <Icon className="w-5 h-5" style={{ color }} />
+        <Icon className="w-6 h-6" style={{ color }} />
       </div>
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>{label}</p>
-        <p className="text-base font-bold mt-0.5" style={{ color: 'var(--foreground)' }}>
-          {value}<span className="text-xs font-semibold ml-1" style={{ color: 'var(--muted-foreground)' }}>{unit}</span>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5 break-words">{label}</p>
+        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight break-words">
+          {value}<span className="text-sm font-medium ml-1 text-slate-400">{unit}</span>
         </p>
       </div>
     </div>
@@ -74,11 +73,115 @@ function CustomTooltip({ active, payload, label }: any) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function LocalWeatherPage() {
+  const [coords, setCoords] = useState<{lat: number, lon: number}>({ lat: 6.9271, lon: 79.8612 });
+  const [locationName, setLocationName] = useState<string>("Locating...");
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [locationInput, setLocationInput] = useState("");
+  const [isLocating, setIsLocating] = useState(false);
+  const [isPredictionEnabled, setIsPredictionEnabled] = useState(true);
+
+  const handleTogglePrediction = async () => {
+    const newState = !isPredictionEnabled;
+    setIsPredictionEnabled(newState);
+    try {
+      await axios.post('http://localhost:3001/api/v1/ai/rain-prediction/esp32_weather_01/toggle', { enabled: newState });
+    } catch (e: any) {
+      console.error("Failed to toggle prediction", e);
+      alert("Failed to update database: " + e.message);
+      // Revert state on failure
+      setIsPredictionEnabled(!newState);
+    }
+  };
+
+  const handleLocationSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!locationInput.trim()) {
+      setIsEditingLocation(false);
+      return;
+    }
+    
+    setIsLocating(true);
+    try {
+      const res = await axios.get(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationInput)}&count=1&language=en&format=json`);
+      if (res.data && res.data.results && res.data.results.length > 0) {
+        const result = res.data.results[0];
+        setCoords({ lat: result.latitude, lon: result.longitude });
+        setLocationName(`${result.name}, ${result.country_code}`);
+      } else {
+        alert("Location not found. Please try another city name.");
+      }
+    } catch (error) {
+      console.error("Geocoding failed", error);
+    } finally {
+      setIsLocating(false);
+      setIsEditingLocation(false);
+    }
+  };
+
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          setCoords({ lat: latitude, lon: longitude });
+          try {
+            const res = await axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+            if (res.data) {
+              const city = res.data.city || res.data.locality || res.data.principalSubdivision;
+              const country = res.data.countryCode;
+              if (city && country) {
+                setLocationName(`${city}, ${country}`);
+              } else if (city) {
+                setLocationName(city);
+              } else {
+                setLocationName("Live GPS Location");
+              }
+            }
+          } catch (e) {
+            setLocationName("Live GPS Location");
+          }
+        },
+        async () => {
+          try {
+            const ipRes = await axios.get("https://freeipapi.com/api/json/");
+            if (ipRes.data && ipRes.data.latitude && ipRes.data.longitude) {
+              setCoords({ lat: ipRes.data.latitude, lon: ipRes.data.longitude });
+              const city = ipRes.data.cityName || ipRes.data.regionName;
+              const country = ipRes.data.countryCode;
+              if (city && country) {
+                setLocationName(`${city}, ${country}`);
+              } else {
+                setLocationName("Live IP Location");
+              }
+            } else {
+              setLocationName("Colombo, LK");
+            }
+          } catch (ipErr) {
+            setLocationName("Colombo, LK");
+          }
+        },
+        { timeout: 8000, enableHighAccuracy: true }
+      );
+    } else {
+      setLocationName("Colombo, LK");
+    }
+  }, []);
+
+  const { data: aiPrediction, isLoading: aiLoading, isFetching: aiFetching } = useQuery({
+    queryKey: ['rainPrediction', coords.lat, coords.lon],
+    queryFn: async () => {
+      const res = await axios.get(`http://localhost:3001/api/v1/ai/rain-prediction/esp32_weather_01?lat=${coords.lat}&lon=${coords.lon}`);
+      return res.data;
+    },
+    enabled: isPredictionEnabled,
+    refetchInterval: 300000, // Refresh every 5 minutes
+  });
+
   const { data: dbHistory, isLoading } = useQuery({
     queryKey: ['environmentHistory'],
     queryFn: async () => {
       // 3-second timeout so the page doesn't hang forever if the backend is offline
-      const res = await axios.get('http://localhost:3001/api/v1/telemetry/environment/history/agribot_receiver_01', {
+      const res = await axios.get('http://localhost:3001/api/v1/telemetry/environment/history/esp32_weather_01', {
         timeout: 3000 
       });
       return res.data;
@@ -165,6 +268,32 @@ export default function LocalWeatherPage() {
             <div className="flex items-center gap-2 mb-1">
               <CloudSun className="w-4 h-4 opacity-75" />
               <span className="text-sm opacity-75 font-medium">On-Site Weather Station</span>
+              <span className="text-sm opacity-50 px-1">•</span>
+              <Navigation className="w-3.5 h-3.5 opacity-75" />
+              {isEditingLocation ? (
+                <form onSubmit={handleLocationSubmit} className="flex items-center">
+                  <input
+                    type="text"
+                    value={locationInput}
+                    onChange={(e) => setLocationInput(e.target.value)}
+                    placeholder="Enter city..."
+                    className="text-sm bg-white/20 border border-white/30 rounded px-2 py-0.5 text-white placeholder-white/60 focus:outline-none focus:ring-1 focus:ring-white/50 w-32 md:w-40"
+                    autoFocus
+                    disabled={isLocating}
+                  />
+                </form>
+              ) : (
+                <span 
+                  className="text-sm opacity-75 font-medium cursor-pointer hover:opacity-100 hover:underline transition-all" 
+                  onClick={() => {
+                    setLocationInput(locationName.split(',')[0]);
+                    setIsEditingLocation(true);
+                  }}
+                  title="Click to edit location"
+                >
+                  {locationName}
+                </span>
+              )}
             </div>
             <h2 className="text-2xl md:text-3xl font-bold">Local Microclimate</h2>
             <p className="text-sm opacity-80 mt-1 max-w-xl">
@@ -191,6 +320,80 @@ export default function LocalWeatherPage() {
         </div>
       </div>
 
+      {/* ── AI Rain Prediction ─────────────────────────────────────────────────── */}
+      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-50">
+              <CloudRain className="w-5 h-5 text-indigo-500" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-foreground">AI Rain Prediction</h3>
+              <p className="text-sm text-muted-foreground">Synthesized from regional forecast and local telemetry</p>
+            </div>
+          </div>
+          
+          <button 
+            disabled={aiFetching}
+            onClick={handleTogglePrediction}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${isPredictionEnabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-700'} ${aiFetching ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isPredictionEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
+        
+        {!isPredictionEnabled ? (
+          <div className="flex flex-col items-center justify-center py-6 text-muted-foreground bg-gray-50/50 dark:bg-white/5 rounded-xl border border-dashed border-gray-200 dark:border-white/10">
+            <CloudRain className="w-8 h-8 mb-2 opacity-20" />
+            <p className="font-medium">Prediction Disabled</p>
+            <p className="text-xs opacity-70">Turn it on to fetch the latest AI weather synthesis.</p>
+          </div>
+        ) : aiFetching && !aiPrediction ? (
+          <div className="flex items-center gap-3 text-muted-foreground animate-pulse">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm font-medium">Analyzing microclimate data...</span>
+          </div>
+        ) : aiPrediction ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+              <p className="font-medium text-indigo-900 text-sm md:text-base leading-relaxed">
+                "{aiPrediction.prediction}"
+              </p>
+              <div className="flex flex-col items-end pl-4 ml-4 border-l border-indigo-200">
+                <span className="text-2xl font-black text-indigo-600">{aiPrediction.confidence}%</span>
+                <span className="text-xs font-semibold text-indigo-400 uppercase tracking-widest">Confidence</span>
+              </div>
+            </div>
+
+            {(aiPrediction.expected_rainfall_mm !== undefined || aiPrediction.rain_intensity) && (
+              <div className="flex gap-6 mt-1 mb-1 px-2">
+                {aiPrediction.expected_rainfall_mm !== undefined && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Expected Rain</span>
+                    <span className="font-bold text-indigo-700">{aiPrediction.expected_rainfall_mm} mm</span>
+                  </div>
+                )}
+                {aiPrediction.rain_intensity && aiPrediction.rain_intensity !== "None" && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Intensity</span>
+                    <span className="font-bold text-indigo-700">{aiPrediction.rain_intensity}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {aiPrediction.reasoning && (
+              <p className="text-xs text-muted-foreground flex items-start gap-2">
+                <span className="font-semibold text-foreground">Reasoning:</span>
+                {aiPrediction.reasoning}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Unable to fetch AI prediction at this time.</p>
+        )}
+      </div>
+
       {/* ── Comprehensive Grid Data ───────────────────────────────────────────── */}
       
       <div className="flex flex-col gap-8">
@@ -206,10 +409,11 @@ export default function LocalWeatherPage() {
               <p className="text-xs text-muted-foreground">Air quality, pressure, and heat metrics</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <StatCard icon={Thermometer} label="Air Temp" value={LATEST.air_temperature.toFixed(1)} unit="°C" color="hsl(20, 80%, 52%)" bgColor="hsl(20, 80%, 95%)" />
             <StatCard icon={Droplets} label="Humidity" value={LATEST.humidity_percent.toFixed(0)} unit="%" color="hsl(210, 68%, 48%)" bgColor="hsl(210, 68%, 95%)" />
             <StatCard icon={Gauge} label="Pressure" value={LATEST.atmospheric_pressure_hpa.toFixed(0)} unit="hPa" color="hsl(260, 40%, 50%)" bgColor="hsl(260, 40%, 95%)" />
+            <StatCard icon={Activity} label="Pressure Cond" value={LATEST.pressure_condition} unit="" color="hsl(260, 40%, 65%)" bgColor="hsl(260, 40%, 95%)" />
             <StatCard icon={Sun} label="Heat Index" value={LATEST.heat_index.toFixed(1)} unit="°C" color="hsl(15, 80%, 55%)" bgColor="hsl(15, 80%, 95%)" />
             <StatCard icon={Cloud} label="Dew Point" value={LATEST.dew_point.toFixed(1)} unit="°C" color="hsl(200, 60%, 50%)" bgColor="hsl(200, 60%, 95%)" />
             <StatCard icon={Activity} label="Dew Pt Spread" value={LATEST.dew_point_spread_c.toFixed(1)} unit="°C" color="hsl(280, 50%, 60%)" bgColor="hsl(280, 50%, 95%)" />
@@ -248,10 +452,12 @@ export default function LocalWeatherPage() {
               <p className="text-xs text-muted-foreground">Light and ground metrics</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard icon={Sun} label="Light Int." value={(LATEST.light_intensity / 1000).toFixed(1)} unit="k lx" color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)" />
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <StatCard icon={Sun} label="Light Int." value={LATEST.light_intensity.toFixed(1)} unit="lux" color="hsl(45, 90%, 45%)" bgColor="hsl(45, 90%, 94%)" />
             <StatCard icon={CloudSun} label="Light Cond." value={LATEST.light_condition} unit="" color="hsl(35, 90%, 55%)" bgColor="hsl(35, 90%, 95%)" />
+            <StatCard icon={Mountain} label="Altitude" value={LATEST.altitude_m.toFixed(1)} unit="m" color="hsl(210, 40%, 50%)" bgColor="hsl(210, 40%, 95%)" />
             <StatCard icon={Sprout} label="Soil Temp" value={LATEST.soil_temperature.toFixed(1)} unit="°C" color="hsl(142, 60%, 40%)" bgColor="hsl(142, 60%, 95%)" />
+            <StatCard icon={Leaf} label="Soil Cond" value={LATEST.soil_condition} unit="" color="hsl(120, 60%, 35%)" bgColor="hsl(120, 60%, 95%)" />
             <StatCard icon={Activity} label="Soil vs Air" value={LATEST.soil_vs_air > 0 ? `+${LATEST.soil_vs_air.toFixed(1)}` : LATEST.soil_vs_air.toFixed(1)} unit="°C" color="hsl(280, 50%, 50%)" bgColor="hsl(280, 50%, 95%)" />
           </div>
         </section>
@@ -273,7 +479,7 @@ export default function LocalWeatherPage() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           
           {/* 1. Thermodynamics (Temp, Soil Temp, Dew Point) */}
-          <div className="rounded-2xl p-6 animate-fade-in card-lift" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+          <div className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
             <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Thermodynamics & Condensation Risk</h4>
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={history} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
@@ -290,7 +496,7 @@ export default function LocalWeatherPage() {
           </div>
 
           {/* 2. Hydration & Wind */}
-          <div className="rounded-2xl p-6 animate-fade-in card-lift" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+          <div className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
             <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Hydration & Wind Forces</h4>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={history} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
@@ -314,7 +520,7 @@ export default function LocalWeatherPage() {
           </div>
 
           {/* 3. Solar Energy (Full Width) */}
-          <div className="rounded-2xl p-6 animate-fade-in card-lift xl:col-span-2" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+          <div className="rounded-[1.5rem] p-6 animate-fade-in xl:col-span-2 transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
             <h4 className="font-bold text-sm mb-4" style={{ color: 'var(--foreground)' }}>Solar Energy & Light Condition</h4>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={history} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
@@ -351,7 +557,7 @@ export default function LocalWeatherPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border overflow-hidden" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
+        <div className="rounded-[1.5rem] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-sm text-left">
               <thead className="text-xs uppercase sticky top-0 z-10" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>

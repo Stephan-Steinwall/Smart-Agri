@@ -33,15 +33,15 @@ type SavedAnalysis = {
 
 function SensorCard({ icon: Icon, label, value, unit, color, bgColor }: { icon: React.ElementType; label: string; value: string | number; unit?: string; color: string; bgColor: string; }) {
   return (
-    <div className="rounded-2xl p-4 flex items-center gap-4 card-lift animate-fade-in min-w-0 overflow-hidden" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
-      <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: bgColor }}>
-        <Icon className="w-5 h-5" style={{ color }} />
+    <div className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in min-w-0 overflow-hidden">
+      <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center flex-shrink-0" style={{ background: bgColor }}>
+        <Icon className="w-6 h-6" style={{ color }} />
       </div>
       <div className="min-w-0">
-        <p className="text-xs font-medium uppercase tracking-wide break-words" style={{ color: 'var(--muted-foreground)' }}>{label}</p>
-        <p className="text-lg font-bold mt-0.5 break-words" style={{ color: 'var(--foreground)' }}>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5 break-words">{label}</p>
+        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight break-words">
           {value}
-          {unit ? <span className="text-sm font-medium ml-0.5" style={{ color: 'var(--muted-foreground)' }}>{unit}</span> : null}
+          {unit ? <span className="text-sm font-medium ml-1 text-slate-400">{unit}</span> : null}
         </p>
       </div>
     </div>
@@ -89,14 +89,44 @@ export default function AnalyzeDataPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    
+    // Fallback to local storage first for instant load
     try {
       const stored = window.localStorage.getItem('smart-agri-saved-analyses');
       if (stored) {
         setSavedAnalyses(JSON.parse(stored));
       }
     } catch {
-      // Ignore storage errors and continue with an empty list.
+      // Ignore storage errors
     }
+
+    // Fetch latest from backend database
+    axios.get(`${API_BASE}/telemetry/saved-analyses/${DEVICE_ID}`).then(res => {
+      if (res.data && Array.isArray(res.data)) {
+        const mapped = res.data.map((row: any) => ({
+          id: row.id,
+          label: row.label,
+          createdAt: row.saved_at || row.created_at,
+          soilMetrics: {
+            moisture: row.soil_moisture,
+            temperature: row.temperature,
+            ph: row.soil_ph,
+            conductivity: row.soil_conductivity,
+            nitrogen: row.nitrogen,
+            phosphorus: row.phosphorus,
+            potassium: row.potassium,
+            tds: row.tds,
+            salinity: row.salinity,
+          },
+          cropRecommendation: row.recommended_crop || 'No crop recommendation generated'
+        }));
+        setSavedAnalyses(mapped);
+        window.localStorage.setItem('smart-agri-saved-analyses', JSON.stringify(mapped));
+      }
+    }).catch(err => {
+      // eslint-disable-next-line no-console
+      console.warn("Failed to fetch saved analyses from DB", err);
+    });
   }, []);
 
   // Supabase realtime subscription: listen for new/updated sensor rows and refresh queries
@@ -208,15 +238,23 @@ export default function AnalyzeDataPage() {
     });
   }, [selectedAnalyses]);
 
-  const seriesColors = ['hsl(142, 65%, 38%)', 'hsl(210, 68%, 48%)'];
+  const seriesColors = [
+    'hsl(142, 65%, 38%)', 
+    'hsl(210, 68%, 48%)',
+    'hsl(280, 65%, 55%)',
+    'hsl(45, 90%, 45%)',
+    'hsl(20, 80%, 52%)',
+    'hsl(330, 65%, 50%)',
+    'hsl(190, 80%, 40%)',
+    'hsl(260, 65%, 45%)',
+    'hsl(208, 87%, 45%)',
+    'hsl(0, 80%, 55%)'
+  ];
 
   const handleToggleSelection = (id: string) => {
     setSelectedIds((current) => {
       if (current.includes(id)) {
         return current.filter((itemId) => itemId !== id);
-      }
-      if (current.length >= 2) {
-        return [current[1], id];
       }
       return [...current, id];
     });
@@ -316,6 +354,9 @@ export default function AnalyzeDataPage() {
 
         const nextItems = [entry, ...savedAnalyses];
         setSavedAnalyses(nextItems);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('smart-agri-saved-analyses', JSON.stringify(nextItems));
+        }
         // Refresh latest reading and history so UI reflects newly saved data immediately
         queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorLatest', DEVICE_ID] });
         queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID] });
@@ -409,7 +450,7 @@ export default function AnalyzeDataPage() {
           </div>
         </div>
       )}
-      <div className="rounded-2xl p-6 md:p-8 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, hsl(210, 68%, 28%) 0%, hsl(142, 58%, 28%) 55%, hsl(162, 45%, 35%) 100%)' }}>
+      <div className="rounded-[1.5rem] p-6 md:p-8 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, hsl(210, 68%, 28%) 0%, hsl(142, 58%, 28%) 55%, hsl(162, 45%, 35%) 100%)' }}>
         <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full opacity-10" style={{ background: 'white' }} />
         <div className="relative z-10">
           <Link href="/wireless-soil-sensor" className="inline-flex items-center gap-2 text-sm text-white/80 hover:text-white">
@@ -423,7 +464,7 @@ export default function AnalyzeDataPage() {
         </div>
       </div>
 
-      <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+      <section className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="flex flex-wrap items-center gap-3 mb-5">
           <div className="inline-flex items-center rounded-full px-3.5 py-2 text-sm font-semibold" style={{ background: 'hsl(210, 68%, 95%)', color: 'hsl(210, 68%, 35%)' }}>
             <span className="w-2.5 h-2.5 rounded-full mr-2" style={{ background: statusColor }} />
@@ -451,7 +492,7 @@ export default function AnalyzeDataPage() {
         </div>
       </section>
 
-      <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+      <section className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-4">
@@ -610,7 +651,7 @@ export default function AnalyzeDataPage() {
 
       </section>
 
-      <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+      <section className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="flex items-center justify-between gap-3 mb-5">
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Comparison Charts</h2>
@@ -684,7 +725,7 @@ export default function AnalyzeDataPage() {
         )}
       </section>
 
-      <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+      <section className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="flex items-center justify-between gap-3 mb-5">
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Saved Analyses</h2>

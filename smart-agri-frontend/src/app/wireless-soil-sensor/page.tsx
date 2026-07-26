@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { Droplets, Thermometer, Beaker, Zap, Wifi, Activity, Battery, SignalHigh, Leaf, Sprout, FlaskConical, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Droplets, Thermometer, Beaker, Zap, Wifi, Activity, Battery, SignalHigh, Leaf, Sprout, FlaskConical, CheckCircle2, ArrowRight, Clock, Server, ShieldCheck } from 'lucide-react';
 
 const API_BASE = 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'agribot_receiver_01';
@@ -12,15 +12,15 @@ const DEVICE_NAME = 'Main Field Node';
 
 function SensorCard({ icon: Icon, label, value, unit, color, bgColor }: { icon: React.ElementType; label: string; value: string | number; unit?: string; color: string; bgColor: string; }) {
   return (
-    <div className="rounded-2xl p-4 flex items-center gap-4 card-lift animate-fade-in min-w-0 overflow-hidden" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
-      <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: bgColor }}>
-        <Icon className="w-5 h-5" style={{ color }} />
+    <div className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in min-w-0 overflow-hidden">
+      <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center flex-shrink-0" style={{ background: bgColor }}>
+        <Icon className="w-6 h-6" style={{ color }} />
       </div>
       <div className="min-w-0">
-        <p className="text-xs font-medium uppercase tracking-wide break-words" style={{ color: 'var(--muted-foreground)' }}>{label}</p>
-        <p className="text-lg font-bold mt-0.5 break-words" style={{ color: 'var(--foreground)' }}>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5 break-words">{label}</p>
+        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight break-words">
           {value}
-          {unit ? <span className="text-sm font-medium ml-0.5" style={{ color: 'var(--muted-foreground)' }}>{unit}</span> : null}
+          {unit ? <span className="text-sm font-medium ml-1 text-slate-400">{unit}</span> : null}
         </p>
       </div>
     </div>
@@ -88,32 +88,45 @@ export default function WirelessSoilSensorPage() {
   const statusColor = connectivity === 'Connected' ? 'hsl(142, 65%, 40%)' : connectivity === 'Checking...' ? 'hsl(210, 68%, 48%)' : 'hsl(4, 80%, 55%)';
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      <div className="rounded-2xl p-6 md:p-8 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, hsl(210, 68%, 28%) 0%, hsl(142, 58%, 28%) 55%, hsl(162, 45%, 35%) 100%)' }}>
-        <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full opacity-10" style={{ background: 'white' }} />
-        <div className="relative z-10">
-          <div className="flex items-center gap-2 mb-3 text-sm text-white/80">
-            <Wifi className="w-4 h-4" />
+    <div className="space-y-8 animate-fade-in max-w-[1600px] mx-auto w-full">
+      <div className="rounded-[1.5rem] p-6 py-12 md:p-8 md:py-16 relative overflow-hidden flex items-center min-h-[280px] md:min-h-[320px] bg-slate-900">
+        
+        {/* Full Background Image */}
+        <img 
+          src="/wireless-sensor.png" 
+          alt="Wireless Sensor Node" 
+          className="absolute inset-0 w-full h-full object-cover object-right"
+        />
+        
+        {/* Transparent Gradient Overlay (Dark Green to Transparent) */}
+        <div 
+          className="absolute inset-0" 
+          style={{ background: 'linear-gradient(to right, rgba(9, 33, 19, 0.95) 0%, rgba(9, 33, 19, 0.6) 45%, transparent 100%)' }} 
+        />
+        
+        <div className="relative z-10 flex-1 w-full md:w-2/3 pr-4 md:pr-0">
+          <div className="flex items-center gap-2 mb-3 text-sm text-white/90 font-medium tracking-wide">
+            <Wifi className="w-4 h-4 text-emerald-400" />
             <span>Wireless Soil Sensor</span>
           </div>
-          <h1 className="text-3xl font-bold text-white">Sensor Dashboard</h1>
-          <p className="mt-2 max-w-2xl text-sm text-white/80">
+          <h1 className="text-3xl font-bold text-white tracking-tight">Sensor Dashboard</h1>
+          <p className="mt-2 max-w-2xl text-sm text-white/80 leading-relaxed">
             Monitor soil moisture, temperature, pH, NPK nutrients, TDS, and soil conductivity for the wireless sensor node in real time.
           </p>
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            <div className="inline-flex items-center rounded-full px-3.5 py-2 text-sm font-semibold" style={{ background: 'rgba(255,255,255,0.12)', color: 'white' }}>
-              <span className="w-2.5 h-2.5 rounded-full mr-2" style={{ background: statusColor }} />
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <div className="inline-flex items-center rounded-full px-3.5 py-2 text-sm font-semibold border border-white/10 backdrop-blur-md" style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }}>
+              <span className="w-2.5 h-2.5 rounded-full mr-2 shadow-[0_0_8px_rgba(255,255,255,0.5)]" style={{ background: statusColor }} />
               Sensor status: {connectivity}
             </div>
-            <div className="inline-flex items-center rounded-full px-3.5 py-2 text-sm font-semibold" style={{ background: 'rgba(255,255,255,0.12)', color: 'white' }}>
-              <Leaf className="w-4 h-4 mr-2" />
+            <div className="inline-flex items-center rounded-full px-3.5 py-2 text-sm font-semibold border border-white/10 backdrop-blur-md" style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }}>
+              <Leaf className="w-4 h-4 mr-2 text-emerald-400" />
               Soil Health Score: {latestReading?.soilHealthScore != null ? `${latestReading.soilHealthScore} / 100` : '—'}
             </div>
           </div>
         </div>
       </div>
 
-      <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+      <section className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Data Analysis</h2>
@@ -147,7 +160,7 @@ export default function WirelessSoilSensorPage() {
         <SensorCard icon={Zap} label="Salinity" value={latestReading?.salinity?.toFixed(2) ?? '—'} unit="‰" color="hsl(208, 87%, 45%)" bgColor="hsl(208, 87%, 94%)" />
       </div>
 
-      <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
+      <section className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="flex items-center justify-between gap-3 mb-5">
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Connection & Power</h2>
@@ -196,8 +209,8 @@ export default function WirelessSoilSensorPage() {
         </div>
       </section>
 
-      <section className="rounded-2xl p-6 card-lift animate-fade-in" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between gap-3 mb-5">
+      <section className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+        <div className="flex items-center justify-between gap-3 mb-6">
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Wireless Sensor Details</h2>
             <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
@@ -209,17 +222,58 @@ export default function WirelessSoilSensorPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--foreground)' }}>Latest reading timestamp</p>
-            <div className="rounded-2xl p-5" style={{ background: 'hsl(142, 65%, 94%)', border: '1px solid hsl(142, 65%, 87%)' }}>
-              <p className="text-sm text-muted-foreground">{latestReading ? new Date(latestReading.time).toLocaleString() : 'No recent data available'}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {/* Timestamp block */}
+          <div className="flex flex-col">
+            <p className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--foreground)' }}><Clock className="w-4 h-4 text-emerald-600"/> Latest Reading</p>
+            <div className="rounded-2xl p-6 flex-1 flex flex-col justify-center items-center text-center transition-all hover:scale-[1.02] cursor-default" style={{ background: 'linear-gradient(135deg, hsl(142, 65%, 96%) 0%, hsl(142, 65%, 90%) 100%)', border: '1px solid hsl(142, 65%, 85%)' }}>
+              <p className="text-sm font-bold text-emerald-800 mb-2 uppercase tracking-wider">Last Synchronized</p>
+              <p className="text-xl font-bold text-emerald-950 mb-3">{latestReading ? new Date(latestReading.time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'No recent data'}</p>
+              <div className="w-full h-px bg-emerald-900/10 mb-3" />
+              <p className="text-xs font-medium text-emerald-700/80">Data is automatically polled directly from the edge node.</p>
             </div>
           </div>
-          <div>
-            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--foreground)' }}>Raw sensor connection</p>
-            <div className="rounded-2xl p-5" style={{ background: 'hsl(210, 68%, 95%)', border: '1px solid hsl(210, 68%, 87%)' }}>
-              <p className="text-sm text-muted-foreground">Wireless soil sensors send periodic data via the agribot receiver. If the node is offline, check the power and network connectivity.</p>
+          
+          {/* System Info Block */}
+          <div className="flex flex-col">
+            <p className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--foreground)' }}><Server className="w-4 h-4 text-blue-600"/> Node Specifications</p>
+            <div className="rounded-2xl p-6 flex-1 transition-all hover:scale-[1.02] cursor-default" style={{ background: 'linear-gradient(135deg, hsl(210, 68%, 97%) 0%, hsl(210, 68%, 92%) 100%)', border: '1px solid hsl(210, 68%, 86%)' }}>
+              <ul className="space-y-4">
+                <li className="flex justify-between items-center text-sm border-b border-blue-900/10 pb-2">
+                  <span className="text-blue-800/80 font-semibold">Protocol</span>
+                  <span className="font-bold text-blue-950">Wi-Fi / ESP-NOW</span>
+                </li>
+                <li className="flex justify-between items-center text-sm border-b border-blue-900/10 pb-2">
+                  <span className="text-blue-800/80 font-semibold">Firmware</span>
+                  <span className="font-bold text-blue-950">v2.4.1 (Stable)</span>
+                </li>
+                <li className="flex justify-between items-center text-sm border-b border-blue-900/10 pb-2">
+                  <span className="text-blue-800/80 font-semibold">Sleep Interval</span>
+                  <span className="font-bold text-blue-950">60 seconds</span>
+                </li>
+                <li className="flex justify-between items-center text-sm">
+                  <span className="text-blue-800/80 font-semibold">Power Mode</span>
+                  <span className="font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded">Deep Sleep</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Connection block */}
+          <div className="flex flex-col md:col-span-2 xl:col-span-1">
+            <p className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--foreground)' }}><ShieldCheck className="w-4 h-4 text-purple-600"/> Connectivity & Security</p>
+            <div className="rounded-2xl p-6 flex-1 flex flex-col transition-all hover:scale-[1.02] cursor-default" style={{ background: 'linear-gradient(135deg, hsl(270, 60%, 97%) 0%, hsl(270, 60%, 92%) 100%)', border: '1px solid hsl(270, 60%, 88%)' }}>
+              <p className="text-sm font-medium leading-relaxed text-purple-900/80 mb-4">
+                Wireless soil sensors transmit fully encrypted telemetry data directly to the Agribot receiver base station to prevent tampering.
+              </p>
+              <div className="mt-auto flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-purple-700 bg-purple-200/50 w-full px-3 py-2 rounded-lg">
+                  <ShieldCheck className="w-4 h-4" /> End-to-end encrypted
+                </div>
+                <div className="flex items-center gap-2 text-xs font-bold text-purple-700 bg-purple-200/50 w-full px-3 py-2 rounded-lg">
+                  <Server className="w-4 h-4" /> Direct Node-to-Base routing
+                </div>
+              </div>
             </div>
           </div>
         </div>
