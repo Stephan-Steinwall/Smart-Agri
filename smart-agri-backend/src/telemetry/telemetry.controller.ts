@@ -40,6 +40,11 @@ export class TelemetryController {
     return this.telemetryService.saveAnalysis(body);
   }
 
+  @Post('update-analysis-evaluation')
+  async updateAnalysisEvaluation(@Body() body: any) {
+    return this.telemetryService.updateAnalysisEvaluation(body);
+  }
+
   @Post('delete-analysis')
   async deleteAnalysis(@Body() body: any) {
     return this.telemetryService.deleteAnalysis(body);

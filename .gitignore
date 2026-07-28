@@ -1,0 +1,5 @@
+# ML Backend ignore
+ml_backend/.env
+ml_backend/models/*.joblib
+ml_backend/.venv/
+ml_backend/__pycache__/

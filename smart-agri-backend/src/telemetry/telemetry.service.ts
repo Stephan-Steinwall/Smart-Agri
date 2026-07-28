@@ -95,7 +95,9 @@ export class TelemetryService {
       receiverWifiConnected: row.receiver_wifi_connected ?? null,
       receiverWifiSignalStrength: row.receiver_wifi_signal_strength_dbm ?? null,
       receiverWifiQuality: row.receiver_wifi_signal_quality ?? null,
-      sensorStatus: row.sensor_status ?? null,
+      sensorStatus: row.sensor_status ?? 'Connected',
+      hc12PacketReceived: row.hc12_packet_received ?? true,
+      hc12_packet_received: row.hc12_packet_received ?? true,
       receiverUptimeMinutes: row.receiver_uptime_minutes ?? null,
       receiverUptimeSeconds: row.receiver_uptime_seconds ?? null,
       soilHealthScore: this.calculateSoilHealthScore(row),
@@ -242,16 +244,17 @@ export class TelemetryService {
   async saveAnalysis(payload: any): Promise<any> {
     try {
       const row = {
-        label: payload.label ?? 'Unnamed Analysis',
+        soil_sample_label: payload.soil_sample_label ?? payload.label ?? 'Unnamed Analysis',
+        crop_label: payload.crop_label ?? payload.cropLabel ?? null,
         soil_moisture:
-          payload.soil_moisture ?? payload.soilMetrics?.moisture ?? null,
+          payload.soil_moisture ?? payload.soilMetrics?.moisture ?? 0,
         temperature:
-          payload.temperature ?? payload.soilMetrics?.temperature ?? null,
-        soil_ph: payload.soil_ph ?? payload.soilMetrics?.ph ?? null,
+          payload.temperature ?? payload.soilMetrics?.temperature ?? 0,
+        soil_ph: payload.soil_ph ?? payload.soilMetrics?.ph ?? 7,
         soil_conductivity:
           payload.soil_conductivity ??
           payload.soilMetrics?.conductivity ??
-          null,
+          0,
         soil_health_score:
           payload.soil_health_score ?? payload.soilHealthScore ?? null,
         nitrogen: payload.nitrogen ?? payload.soilMetrics?.nitrogen ?? null,
@@ -266,6 +269,13 @@ export class TelemetryService {
           payload.recommendation_reason ?? payload.recommendationReason ?? null,
         device_id:
           payload.deviceId ?? payload.device_id ?? 'agribot_receiver_01',
+        reading_at: payload.reading_at ?? payload.readingAt ?? new Date().toISOString(),
+        prediction_confidence: payload.prediction_confidence ?? payload.predictionConfidence ?? null,
+        model_version: payload.model_version ?? payload.modelVersion ?? null,
+        label_status: payload.label_status ?? payload.labelStatus ?? 'pending',
+        labelled_by: payload.labelled_by ?? payload.labelledBy ?? null,
+        verified_by: payload.verified_by ?? payload.verifiedBy ?? null,
+        verified_at: payload.verified_at ?? payload.verifiedAt ?? null,
       };
 
       // Table name contains spaces; supply the exact table name (Supabase client quotes internally)
@@ -284,6 +294,44 @@ export class TelemetryService {
       return data;
     } catch (err: any) {
       this.logger.error(`saveAnalysis failed: ${err?.message ?? String(err)}`);
+      throw err;
+    }
+  }
+
+  // Update evaluation results for an already saved analysis record
+  async updateAnalysisEvaluation(payload: {
+    id: string;
+    recommended_crop?: string;
+    recommendation_reason?: string;
+    prediction_confidence?: number;
+    model_version?: string;
+  }): Promise<any> {
+    try {
+      if (!payload?.id) {
+        throw new Error('Analysis ID is required for updating evaluation results.');
+      }
+      const updateData = {
+        recommended_crop: payload.recommended_crop ?? null,
+        recommendation_reason: payload.recommendation_reason ?? null,
+        prediction_confidence: payload.prediction_confidence ?? null,
+        model_version: payload.model_version ?? null,
+      };
+
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .from('Wireless sensor Soil Analysis data')
+        .update(updateData)
+        .eq('id', payload.id)
+        .select()
+        .single();
+
+      if (error) {
+        this.logger.error(`Error updating analysis evaluation: ${error.message}`);
+        throw new Error(error.message);
+      }
+      return data;
+    } catch (err: any) {
+      this.logger.error(`updateAnalysisEvaluation failed: ${err?.message ?? String(err)}`);
       throw err;
     }
   }
