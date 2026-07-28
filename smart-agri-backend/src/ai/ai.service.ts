@@ -72,16 +72,30 @@ export class AiService {
   }
 
   async askAgronomist(query: string, deviceId: string, sessionId: string) {
-    // 1. Fetch Context (Current state of the farm)
-    const latestReading =
-      await this.telemetryService.getLatestReading(deviceId);
+    const targetDeviceId = deviceId || 'agribot_receiver_01';
 
-    if (!latestReading) {
-      return {
-        answer:
-          "I'm sorry, but I cannot access the sensor data for this device right now. Please ensure the sensor node is online and transmitting.",
-      };
-    }
+    // 1. Fetch Context from all 5 core system tables in parallel
+    const [
+      latestReading,
+      switchesRes,
+      pumpLogsRes,
+      savedAnalysesRes,
+      cropProfilesRes,
+      recentReadingsRes,
+    ] = await Promise.all([
+      this.telemetryService.getLatestReading(targetDeviceId).catch(() => null),
+      this.supabaseService.getClient().from('system_switches').select('*').eq('device_id', targetDeviceId).maybeSingle(),
+      this.supabaseService.getClient().from('pump_activation_logs').select('*').eq('device_id', targetDeviceId).order('start_time', { ascending: false }).limit(5),
+      this.supabaseService.getClient().from('Wireless sensor Soil Analysis data').select('*').eq('device_id', targetDeviceId).order('saved_at', { ascending: false }).limit(5),
+      this.supabaseService.getClient().from('crop_reference_profiles').select('*').eq('active', true).limit(10),
+      this.supabaseService.getClient().from('soil_readings').select('*').eq('device_id', targetDeviceId).order('created_at', { ascending: false }).limit(3),
+    ]);
+
+    const switches = switchesRes?.data || null;
+    const pumpLogs = pumpLogsRes?.data || [];
+    const savedAnalyses = savedAnalysesRes?.data || [];
+    const cropProfiles = cropProfilesRes?.data || [];
+    const recentReadings = recentReadingsRes?.data || [];
 
     // 2. Fetch Chat History from Supabase
     const { data: chatHistory, error: historyError } =
@@ -98,24 +112,77 @@ export class AiService {
       );
     }
 
+    const readingContext = latestReading
+      ? `CURRENT LIVE READINGS (${latestReading.time || 'Latest'}):
+- Moisture: ${latestReading.moisture}% (Optimal range: 40-70%)
+- Temperature: ${latestReading.temperature}°C
+- Soil pH: ${latestReading.ph} (Optimal range: 6.0-6.8)
+- Soil Conductivity / EC: ${latestReading.soilConductivity ?? latestReading.electricalConductivity ?? 'N/A'} dS/m
+- Nitrogen (N): ${latestReading.nitrogen} mg/kg
+- Phosphorus (P): ${latestReading.phosphorus} mg/kg
+- Potassium (K): ${latestReading.potassium} mg/kg
+- TDS: ${latestReading.tds ?? 'N/A'} ppm | Salinity: ${latestReading.salinity ?? 'N/A'}‰
+- Sensor Status: ${latestReading.sensorStatus || 'Connected'} | Battery: ${latestReading.batteryStatus || 'N/A'} (${latestReading.batteryVoltage || 'N/A'}V)`
+      : `CURRENT LIVE READINGS: No live telemetry currently available for ${targetDeviceId}.`;
+
+    const switchesContext = switches
+      ? `SYSTEM SWITCHES & ACTUATORS (Table: 'system_switches', Device: ${targetDeviceId}):
+- Main System Switch: ${switches.system_switch ? 'ENABLED 🟢' : 'DISABLED 🔴'}
+- Water Pump: ${switches.pump_water ? 'RUNNING 🟢' : 'OFF 🔴'}
+- Nitrogen Pump: ${switches.pump_nitrogen ? 'RUNNING 🟢' : 'OFF 🔴'}
+- Phosphorus Pump: ${switches.pump_phosphorus ? 'RUNNING 🟢' : 'OFF 🔴'}
+- Potassium Pump: ${switches.pump_potassium ? 'RUNNING 🟢' : 'OFF 🔴'}
+- Auxiliary Lights: Light 01 [${switches.light_01 ? 'ON' : 'OFF'}], Light 02 [${switches.light_02 ? 'ON' : 'OFF'}]`
+      : `SYSTEM SWITCHES: No actuator switch records found for ${targetDeviceId}.`;
+
+    const pumpLogsContext = pumpLogs.length > 0
+      ? `RECENT PUMP ACTIVATION LOGS (Table: 'pump_activation_logs', last ${pumpLogs.length} events):
+${pumpLogs.map((l: any) => `- Pump: [${l.pump_name?.toUpperCase()}] | Status: ${l.status} | Duration: ${l.duration_seconds ?? 'N/A'}s | Started: ${new Date(l.start_time).toLocaleString()}`).join('\n')}`
+      : `RECENT PUMP ACTIVATION LOGS: No recent pump activation logs found.`;
+
+    const analysesContext = savedAnalyses.length > 0
+      ? `RECENT SAVED SOIL ANALYSES & ML EVALUATIONS (Table: 'Wireless sensor Soil Analysis data', last ${savedAnalyses.length} records):
+${savedAnalyses.map((a: any) => `- Sample "${a.soil_sample_label}" (${new Date(a.saved_at).toLocaleDateString()}) | Crop: ${a.recommended_crop || a.crop_label || 'N/A'} | Score/Confidence: ${a.prediction_confidence ?? 'N/A'}/100 | Status: ${a.label_status} | Rationale: ${a.recommendation_reason || 'N/A'} | pH: ${a.soil_ph}, EC: ${a.soil_conductivity} dS/m, Moisture: ${a.soil_moisture}%`).join('\n')}`
+      : `RECENT SAVED SOIL ANALYSES: No saved evaluation records found.`;
+
+    const profilesContext = cropProfiles.length > 0
+      ? `AGRONOMIC CROP REFERENCE PROFILES (Table: 'crop_reference_profiles'):
+${cropProfiles.map((c: any) => `- ${c.crop_name} (${c.scientific_name}): pH range [${c.ph_opt_min} - ${c.ph_opt_max}], Temp range [${c.temperature_opt_min_c} - ${c.temperature_opt_max_c}°C], PAW Moisture [${c.moisture_paw_min} - ${c.moisture_paw_max}%], Max EC Guidance: ${c.ec_guidance_max_dsm} dS/m | Drainage: ${c.drainage_requirement}`).join('\n')}`
+      : `AGRONOMIC CROP REFERENCE PROFILES: No profiles loaded.`;
+
+    const historicalReadingsContext = recentReadings.length > 0
+      ? `RECENT RAW SOIL READINGS HISTORY (Table: 'soil_readings', last ${recentReadings.length} packets):
+${recentReadings.map((r: any) => `- [${new Date(r.created_at).toLocaleTimeString()}] Moisture: ${r.soil_moisture_percent}%, pH: ${r.soil_ph}, Temp: ${r.soil_temperature_celsius}°C, EC: ${r.ec_levels}, NPK: ${r.nitrogen}/${r.phosphorus}/${r.potassium}, Battery: ${r.battery_voltage}V (${r.battery_status}), WiFi Signal: ${r.receiver_wifi_signal_strength_dbm} dBm (${r.receiver_wifi_signal_quality})`).join('\n')}`
+      : `RECENT RAW SOIL READINGS HISTORY: No historical raw readings recorded.`;
+
     // 3. Build the System Prompt (RAG Context)
     const systemPrompt = `
-      You are an expert Agronomy AI Assistant managing a Smart Agriculture Platform.
-      You provide concise, professional, and actionable advice to farmers based on raw data.
+      You are an expert Agronomy AI Assistant managing the Smart Agriculture Platform.
+      You have real-time access to all 5 core system database tables and hardware telemetry for device ID: "${targetDeviceId}".
+      You provide concise, professional, accurate, and actionable advice to farmers and system administrators based on the raw telemetry, saved records, pump logs, switch states, and reference profiles provided below.
       
-      CURRENT SENSOR DATA CONTEXT:
-      - Time of reading: ${latestReading.time}
-      - Soil Moisture: ${latestReading.moisture}% (Optimal range: 40-70%)
-      - Temperature: ${latestReading.temperature}°C
-      - Nitrogen (N): ${latestReading.nitrogen} ppm
-      - Phosphorus (P): ${latestReading.phosphorus} ppm
-      - Potassium (K): ${latestReading.potassium} ppm
-      - pH Level: ${latestReading.ph}
+      --- SYSTEM DATABASE RAG CONTEXT ---
+      ${readingContext}
+      
+      ${switchesContext}
+      
+      ${pumpLogsContext}
+      
+      ${analysesContext}
+      
+      ${profilesContext}
+      
+      ${historicalReadingsContext}
+      -----------------------------------
       
       INSTRUCTIONS:
-      Answer the user's question directly based on the data above. Do not hallucinate data. 
-      If moisture is below 30%, recommend immediate irrigation. 
-      Keep responses concise and actionable.
+      1. Answer the user's question directly, clearly, and accurately using the real-time system context above.
+      2. If asked about saved analyses, soil evaluations, or ML recommendations, refer directly to the 'Wireless sensor Soil Analysis data' records.
+      3. If asked about irrigation, pumps, or fertigation, check both the real-time switch states ('system_switches') and historical run logs ('pump_activation_logs').
+      4. If asked about crop compatibility or ideal growth conditions, refer to the exact agronomic thresholds in 'crop_reference_profiles'.
+      5. If asked about battery voltage, WiFi signal strength, or sensor status, refer to the live readings or historical 'soil_readings'.
+      6. Do not hallucinate data. If a specific record is not present in the context above, state clearly what data is available.
+      7. Keep responses concise, practical, and formatted cleanly with bullet points or bold text where appropriate.
     `;
 
     // Format history for OpenAI
@@ -132,14 +199,28 @@ export class AiService {
     // Add the new user query
     messages.push({ role: 'user', content: query });
 
-    // 4. Call OpenAI
-    const response = await this.openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: messages,
-      temperature: 0.2, // Low temperature for factual, analytical responses
-    });
-
-    const answer = response.choices[0].message.content;
+    // 4. Call OpenAI with graceful fallback
+    let answer = '';
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: messages,
+        temperature: 0.2,
+      });
+      answer = response.choices?.[0]?.message?.content || '';
+    } catch (err: any) {
+      this.logger.warn(
+        `OpenAI chat completion failed, generating offline RAG response: ${err?.message}`,
+      );
+      answer = this.generateOfflineChatFallback(query, {
+        latestReading,
+        switches,
+        pumpLogs,
+        savedAnalyses,
+        cropProfiles,
+        recentReadings,
+      });
+    }
 
     // 5. Save the new messages to Chat History
     if (answer) {
@@ -159,6 +240,63 @@ export class AiService {
     }
 
     return { answer };
+  }
+
+  private generateOfflineChatFallback(query: string, context: any): string {
+    const q = query.toLowerCase();
+    const parts: string[] = [];
+
+    if (q.includes('pump') || q.includes('irrigat') || q.includes('water') || q.includes('switch') || q.includes('light')) {
+      parts.push('**Actuator & Switch Status:**');
+      if (context.switches) {
+        parts.push(`- Main Switch: ${context.switches.system_switch ? 'Enabled 🟢' : 'Disabled 🔴'}`);
+        parts.push(`- Water Pump: ${context.switches.pump_water ? 'Running 🟢' : 'Off 🔴'} | N/P/K Pumps: ${context.switches.pump_nitrogen ? 'N:ON' : 'N:OFF'}, ${context.switches.pump_phosphorus ? 'P:ON' : 'P:OFF'}, ${context.switches.pump_potassium ? 'K:ON' : 'K:OFF'}`);
+      } else {
+        parts.push('- No switch state recorded.');
+      }
+      if (context.pumpLogs?.length > 0) {
+        parts.push('\n**Recent Pump Activity:**');
+        context.pumpLogs.forEach((l: any) => {
+          parts.push(`- [${l.pump_name?.toUpperCase()}] ran for ${l.duration_seconds ?? 'N/A'}s (${l.status})`);
+        });
+      }
+    }
+
+    if (q.includes('saved') || q.includes('evaluat') || q.includes('analysis') || q.includes('record') || q.includes('score')) {
+      parts.push('**Recent Saved Soil Analyses:**');
+      if (context.savedAnalyses?.length > 0) {
+        context.savedAnalyses.forEach((a: any) => {
+          parts.push(`- "${a.soil_sample_label}" (${new Date(a.saved_at).toLocaleDateString()}): Recommended **${a.recommended_crop || 'N/A'}** (Score: ${a.prediction_confidence ?? 'N/A'}/100, Status: ${a.label_status})`);
+        });
+      } else {
+        parts.push('- No saved analysis records found.');
+      }
+    }
+
+    if (q.includes('crop') || q.includes('profile') || q.includes('ph') || q.includes('temp') || q.includes('ideal') || q.includes('grow')) {
+      parts.push('**Crop Reference Profiles:**');
+      if (context.cropProfiles?.length > 0) {
+        context.cropProfiles.slice(0, 5).forEach((c: any) => {
+          parts.push(`- **${c.crop_name}**: Optimal pH ${c.ph_opt_min}-${c.ph_opt_max}, Temp ${c.temperature_opt_min_c}-${c.temperature_opt_max_c}°C, Moisture ${c.moisture_paw_min}-${c.moisture_paw_max}%, Max EC: ${c.ec_guidance_max_dsm} dS/m`);
+        });
+      } else {
+        parts.push('- No reference profiles available.');
+      }
+    }
+
+    if (parts.length === 0 || q.includes('status') || q.includes('read') || q.includes('sensor') || q.includes('moisture') || q.includes('battery') || q.includes('wifi')) {
+      parts.push('**Live Farm Telemetry Summary:**');
+      if (context.latestReading) {
+        const r = context.latestReading;
+        parts.push(`- **Soil Moisture:** ${r.moisture}% | **pH:** ${r.ph} | **Temp:** ${r.temperature}°C`);
+        parts.push(`- **Nutrients (NPK):** ${r.nitrogen} / ${r.phosphorus} / ${r.potassium} mg/kg`);
+        parts.push(`- **EC:** ${r.soilConductivity ?? r.electricalConductivity ?? 'N/A'} dS/m | **Battery:** ${r.batteryVoltage ?? 'N/A'}V (${r.batteryStatus ?? 'N/A'})`);
+      } else {
+        parts.push('- No real-time sensor telemetry currently available.');
+      }
+    }
+
+    return parts.join('\n');
   }
 
   private clampScore(value: number): number {
