@@ -409,14 +409,17 @@ export default function SoilAnalysisPage() {
     (async () => {
       try {
         const payload = {
+          soil_sample_label: saveLabel.trim(),
           label: saveLabel.trim(),
+          label_status: 'pending',
+          reading_at: latestReading?.time ? new Date(latestReading.time).toISOString() : new Date().toISOString(),
           deviceId: DEVICE_ID,
           soilMetrics,
           soil_moisture: soilMetrics.moisture,
           temperature: soilMetrics.temperature,
           soil_ph: soilMetrics.ph,
           soil_conductivity: soilMetrics.conductivity,
-          soil_health_score: latestReading?.soilHealthScore ?? latestReading?.soilHealthScore ?? null,
+          soil_health_score: latestReading?.soilHealthScore ?? null,
           nitrogen: soilMetrics.nitrogen,
           phosphorus: soilMetrics.phosphorus,
           potassium: soilMetrics.potassium,
@@ -430,7 +433,7 @@ export default function SoilAnalysisPage() {
         const saved = res.data;
         const entry: SavedAnalysis = {
           id: saved?.id ?? `${Date.now()}`,
-          label: saved?.label ?? saveLabel.trim(),
+          label: saved?.soil_sample_label ?? saved?.label ?? saveLabel.trim(),
           createdAt: saved?.saved_at ?? saved?.created_at ?? new Date().toISOString(),
           soilMetrics,
           cropRecommendation: saved?.recommended_crop ?? cropSuggestion?.recommendedCrop?.crop ?? 'No crop recommendation generated',

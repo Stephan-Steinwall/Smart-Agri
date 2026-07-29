@@ -5,7 +5,11 @@
   "main": "index.js",
   "scripts": {
     "dev": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"npm run start:dev --prefix smart-agri-backend\" \"npm run dev --prefix smart-agri-frontend\"",
-    "seed": "npm run seed --prefix smart-agri-backend"
+    "seed": "npm run seed --prefix smart-agri-backend",
+    "ml:install": "cd ml_backend && python -m pip install -r requirements.txt",
+    "ml:generate": "cd ml_backend && python generate_reference_dataset.py",
+    "ml:train": "cd ml_backend && python train_model.py",
+    "ml:serve": "cd ml_backend && uvicorn app:app --reload"
   },
   "repository": {
     "type": "git",

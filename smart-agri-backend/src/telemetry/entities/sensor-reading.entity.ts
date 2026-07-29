@@ -23,6 +23,8 @@ export interface SensorReading {
   receiverWifiSignalStrength: number | null;
   receiverWifiQuality: string | null;
   sensorStatus: string | null;
+  hc12PacketReceived?: boolean | null;
+  hc12_packet_received?: boolean | null;
   receiverUptimeMinutes: number | null;
   receiverUptimeSeconds: number | null;
 
