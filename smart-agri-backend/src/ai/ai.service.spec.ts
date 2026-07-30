@@ -11,7 +11,10 @@ describe('AiService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AiService,
-        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('mock-key') } },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('mock-key') },
+        },
         { provide: TelemetryService, useValue: {} },
         { provide: SupabaseService, useValue: {} },
       ],

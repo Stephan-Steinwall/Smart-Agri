@@ -2,14 +2,12 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 import Link from 'next/link';
 import { ArrowLeft, Activity, Battery, Beaker, CheckCircle2, ChevronDown, Droplets, FlaskConical, Leaf, SignalHigh, Sprout, Thermometer, Wifi, Zap } from 'lucide-react';
 import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { SUPPORTED_CROPS } from '@/lib/constants';
 
-const ML_API_URL = process.env.NEXT_PUBLIC_ML_API_URL || 'http://127.0.0.1:8000';
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'agribot_receiver_01';
 const DEVICE_NAME = 'Main Field Node';
 
@@ -262,7 +260,7 @@ export default function AnalyzeDataPage() {
   const { data: latestReadingData, isLoading: isLatestLoading, isError: isLatestError } = useQuery({
     queryKey: ['wirelessSoilSensorLatest', DEVICE_ID],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/latest/${DEVICE_ID}`);
+      const res = await apiClient.get(`/telemetry/latest/${DEVICE_ID}`);
       return res.data;
     },
     refetchInterval: 10000,
@@ -271,7 +269,7 @@ export default function AnalyzeDataPage() {
   const { data: history, isLoading: isHistoryLoading, isError: isHistoryError } = useQuery({
     queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/history/${DEVICE_ID}`);
+      const res = await apiClient.get(`/telemetry/history/${DEVICE_ID}`);
       return res.data;
     },
     refetchInterval: 10000,
@@ -295,7 +293,7 @@ export default function AnalyzeDataPage() {
     }
 
     // Fetch latest from backend database
-    axios.get(`${API_BASE}/telemetry/saved-analyses/${DEVICE_ID}`).then(res => {
+    apiClient.get(`/telemetry/saved-analyses/${DEVICE_ID}`).then(res => {
       if (res.data && Array.isArray(res.data)) {
         const mapped = res.data.map((row: any) => ({
           id: row.id,
@@ -462,7 +460,7 @@ export default function AnalyzeDataPage() {
     setCropEvaluateError('');
     setIsSuggestingCrop(true);
     try {
-      const res = await axios.get(`${API_BASE}/ai/suggest-crop/${DEVICE_ID}`);
+      const res = await apiClient.get(`/ai/suggest-crop/${DEVICE_ID}`);
       setCropSuggestion(res.data);
     } catch {
       setCropSuggestion({ error: 'Unable to generate a crop suggestion right now.' });
@@ -521,17 +519,20 @@ export default function AnalyzeDataPage() {
     setIsEvaluatingCrop(true);
 
     try {
-      const ecVal = latestReading.soilConductivity ?? latestReading.electricalConductivity ?? 0;
-      const convertedEc = convertEcToDsm(ecVal, EC_SENSOR_UNIT);
       const pawRes = calculatePlantAvailableWater(moistureVal);
 
-      const res = await axios.post(`${ML_API_URL}/evaluate`, {
-        selected_crop: cropQuery.trim(),
-        soil_ph: phVal,
-        temperature_c: latestReading.temperature ?? 25.0,
-        soil_conductivity_dsm: convertedEc,
-        moisture_paw_percent: pawRes.paw,
+      const res = await apiClient.post('/ai/evaluate-crop', {
+        deviceId: DEVICE_ID,
+        cropName: cropQuery.trim(),
       });
+
+      // A failed evaluation still comes back as 200 OK with an `error` field
+      // (e.g. the ML model service is unreachable) -- surface it as an error
+      // instead of silently rendering a blank "Wait and amend" card.
+      if (res.data?.error) {
+        setCropEvaluateError(res.data.error);
+        return;
+      }
 
       setCropEvaluation({
         ...res.data,
@@ -540,7 +541,7 @@ export default function AnalyzeDataPage() {
         pawPercent: pawRes.paw,
       });
     } catch (err: any) {
-      const errMsg = err?.response?.data?.detail || err?.message || 'Unable to evaluate this crop right now. Please try again later.';
+      const errMsg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || 'Unable to evaluate this crop right now. Please try again later.';
       setCropEvaluateError(errMsg);
     } finally {
       setIsEvaluatingCrop(false);
@@ -599,7 +600,7 @@ export default function AnalyzeDataPage() {
           model_version: null,
         };
 
-        const res = await axios.post(`${API_BASE}/telemetry/save-analysis`, payload);
+        const res = await apiClient.post('/telemetry/save-analysis', payload);
         const saved = res.data;
         const entry: SavedAnalysis = {
           id: saved?.id ?? `${Date.now()}`,
@@ -641,21 +642,28 @@ export default function AnalyzeDataPage() {
       const moistureVal = item.soilMetrics.moisture ?? 50.0;
       const ecVal = item.soilMetrics.conductivity ?? 1.0;
       const tempVal = item.soilMetrics.temperature ?? 25.0;
-      const convertedEc = convertEcToDsm(ecVal, EC_SENSOR_UNIT);
       const pawRes = calculatePlantAvailableWater(moistureVal);
 
-      const res = await axios.post(`${ML_API_URL}/evaluate`, {
-        selected_crop: targetCrop,
-        soil_ph: phVal,
-        temperature_c: tempVal,
-        soil_conductivity_dsm: convertedEc,
-        moisture_paw_percent: pawRes.paw,
+      const res = await apiClient.post('/ai/evaluate-crop', {
+        deviceId: DEVICE_ID,
+        cropName: targetCrop,
+        soilMetrics: {
+          ph: phVal,
+          moisture: moistureVal,
+          conductivity: ecVal,
+          temperature: tempVal,
+        },
       });
 
       const evalData = res.data;
 
+      if (evalData?.error) {
+        alert(`Unable to evaluate "${item.label}": ${evalData.error}`);
+        return;
+      }
+
       // Update that specific row in public."Wireless sensor Soil Analysis data"
-      await axios.post(`${API_BASE}/telemetry/update-analysis-evaluation`, {
+      await apiClient.post('/telemetry/update-analysis-evaluation', {
         id: item.id,
         recommended_crop: evalData.recommended_crop,
         recommendation_reason: evalData.decision_message,
@@ -696,7 +704,7 @@ export default function AnalyzeDataPage() {
 
       let res = null;
       if (idsForServer.length > 0) {
-        res = await axios.post(`${API_BASE}/telemetry/delete-analysis`, { ids: idsForServer });
+        res = await apiClient.post('/telemetry/delete-analysis', { ids: idsForServer });
       }
 
       // remove deleted ids (both server-deleted and local-only) from local state
@@ -948,6 +956,29 @@ export default function AnalyzeDataPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {(cropEvaluation.reasons?.length > 0 || cropEvaluation.actions?.length > 0) && (
+              <div className="mb-4 rounded-xl bg-white border border-slate-200/80 p-4 shadow-sm">
+                <p className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">AI Explanation</p>
+                {cropEvaluation.reasons?.length > 0 && (
+                  <ul className="space-y-1.5 text-sm text-slate-700">
+                    {cropEvaluation.reasons.map((reason: string, index: number) => (
+                      <li key={index} className="ml-4 list-disc">{reason}</li>
+                    ))}
+                  </ul>
+                )}
+                {cropEvaluation.actions?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <p className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-1.5">Recommended Actions</p>
+                    <ul className="space-y-1.5 text-sm text-slate-700">
+                      {cropEvaluation.actions.map((action: string, index: number) => (
+                        <li key={index} className="ml-4 list-disc">{action}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 

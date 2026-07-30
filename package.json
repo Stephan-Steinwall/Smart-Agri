@@ -4,7 +4,7 @@
   "description": "#\u0000 \u0000S\u0000m\u0000a\u0000r\u0000t\u0000-\u0000A\u0000g\u0000r\u0000i\u0000\r\u0000 \u0000",
   "main": "index.js",
   "scripts": {
-    "dev": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"npm run start:dev --prefix smart-agri-backend\" \"npm run dev --prefix smart-agri-frontend\"",
+    "dev": "concurrently -n \"backend,frontend,ml-backend\" -c \"blue,green,yellow\" \"npm run start:dev --prefix smart-agri-backend\" \"npm run dev --prefix smart-agri-frontend\" \"npm run ml:serve\"",
     "seed": "npm run seed --prefix smart-agri-backend",
     "ml:install": "cd ml_backend && python -m pip install -r requirements.txt",
     "ml:generate": "cd ml_backend && python generate_reference_dataset.py",

@@ -2,12 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 import Link from 'next/link';
 import { ArrowLeft, Activity, Battery, Beaker, CheckCircle2, Droplets, FlaskConical, Leaf, SignalHigh, Sprout, Thermometer, Wifi, Zap, BarChart2 } from 'lucide-react';
 import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, ComposedChart } from 'recharts';
 
-const API_BASE = 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'esp32_weather_01';
 const DEVICE_NAME = 'Main Field Node';
 
@@ -104,7 +103,7 @@ export default function SoilAnalysisPage() {
   const { data: history, isLoading: isHistoryLoading, isError: isHistoryError } = useQuery({
     queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/dashboard-history/${DEVICE_ID}`);
+      const res = await apiClient.get(`/telemetry/dashboard-history/${DEVICE_ID}`);
       return res.data;
     },
     refetchInterval: 5000,
@@ -157,7 +156,7 @@ export default function SoilAnalysisPage() {
   const { data: pumpLogs, isLoading: isPumpLogsLoading } = useQuery({
     queryKey: ['pumpLogs', DEVICE_ID],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/pump-logs/${DEVICE_ID}`);
+      const res = await apiClient.get(`/telemetry/pump-logs/${DEVICE_ID}`);
       return res.data;
     },
     refetchInterval: 10000,
@@ -351,7 +350,7 @@ export default function SoilAnalysisPage() {
     setCropEvaluateError('');
     setIsSuggestingCrop(true);
     try {
-      const res = await axios.get(`${API_BASE}/ai/suggest-crop/${DEVICE_ID}`);
+      const res = await apiClient.get(`/ai/suggest-crop/${DEVICE_ID}`);
       setCropSuggestion(res.data);
     } catch {
       setCropSuggestion({ error: 'Unable to generate a crop suggestion right now.' });
@@ -370,7 +369,7 @@ export default function SoilAnalysisPage() {
     setIsEvaluatingCrop(true);
 
     try {
-      const res = await axios.post(`${API_BASE}/ai/evaluate-crop`, {
+      const res = await apiClient.post('/ai/evaluate-crop', {
         deviceId: DEVICE_ID,
         cropName: cropQuery.trim(),
       });
@@ -429,7 +428,7 @@ export default function SoilAnalysisPage() {
           recommendation_reason: cropSuggestion?.summary ?? null,
         };
 
-        const res = await axios.post(`${API_BASE}/telemetry/save-analysis`, payload);
+        const res = await apiClient.post('/telemetry/save-analysis', payload);
         const saved = res.data;
         const entry: SavedAnalysis = {
           id: saved?.id ?? `${Date.now()}`,
@@ -464,7 +463,7 @@ export default function SoilAnalysisPage() {
 
       let res = null;
       if (idsForServer.length > 0) {
-        res = await axios.post(`${API_BASE}/telemetry/delete-analysis`, { ids: idsForServer });
+        res = await apiClient.post('/telemetry/delete-analysis', { ids: idsForServer });
       }
 
       // remove deleted ids (both server-deleted and local-only) from local state

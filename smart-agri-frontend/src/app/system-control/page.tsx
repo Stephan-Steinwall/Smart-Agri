@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 import Link from 'next/link';
 import {
   Power, Sliders, Zap, Droplets, FlaskConical, Sun, Bot, Activity,
@@ -12,7 +12,6 @@ import {
   Lock, Eye, EyeOff, KeyRound
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'esp32_weather_01';
 const DEVICE_NAME = 'Main Field Node';
 
@@ -63,7 +62,7 @@ export default function SystemControlPage() {
         }
       }
 
-      const res = await axios.post(`${API_BASE}/telemetry/auth/verify-system-control`, {
+      const res = await apiClient.post('/telemetry/auth/verify-system-control', {
         emailOrUsername: userEmail,
         password: securityPassword
       });
@@ -160,7 +159,7 @@ export default function SystemControlPage() {
     queryKey: ['systemSwitches', DEVICE_ID],
     queryFn: async () => {
       try {
-        const res = await axios.get(`${API_BASE}/telemetry/system-switches/${DEVICE_ID}`);
+        const res = await apiClient.get(`/telemetry/system-switches/${DEVICE_ID}`);
         return res.data;
       } catch (e) {
         return null;
@@ -190,7 +189,7 @@ export default function SystemControlPage() {
     queryKey: ['pumpLogs', DEVICE_ID],
     queryFn: async () => {
       try {
-        const res = await axios.get(`${API_BASE}/telemetry/pump-logs/${DEVICE_ID}`);
+        const res = await apiClient.get(`/telemetry/pump-logs/${DEVICE_ID}`);
         if (res.data && Array.isArray(res.data) && res.data.length > 0) {
           return res.data;
         }
@@ -239,17 +238,14 @@ export default function SystemControlPage() {
     );
 
     try {
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (SUPABASE_URL && SUPABASE_KEY) {
-        const mod = await import('@supabase/supabase-js');
-        const supabase = mod.createClient(SUPABASE_URL, SUPABASE_KEY);
-        await supabase.from('system_switches').update({ system_switch: newState, updated_at: new Date().toISOString() }).eq('device_id', DEVICE_ID);
-      }
-      await axios.post(`${API_BASE}/telemetry/system-switches/${DEVICE_ID}/toggle`, {
+      // Pump/light control goes through the guarded API only now -- it used
+      // to also write straight to Supabase with the public anon key as an
+      // "optimistic" pre-write, which meant anyone with that key (it ships in
+      // every page load) could flip switches without logging in at all.
+      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
         pumpName: 'system_switch',
         state: newState
-      }).catch(() => {});
+      });
       refetchLogs();
     } catch (e) {
       console.error('Failed to toggle system switch', e);
@@ -275,10 +271,10 @@ export default function SystemControlPage() {
     const allPumps = ['pump_water', 'pump_nitrogen', 'pump_phosphorus', 'pump_potassium', 'light_01', 'light_02', 'system_switch'];
     for (const p of allPumps) {
       try {
-        await axios.post(`${API_BASE}/telemetry/system-switches/${DEVICE_ID}/toggle`, {
+        await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
           pumpName: p,
           state: false
-        }).catch(() => {});
+        });
       } catch (e) {}
     }
     refetchLogs();
@@ -318,17 +314,10 @@ export default function SystemControlPage() {
     );
 
     try {
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (SUPABASE_URL && SUPABASE_KEY) {
-        const mod = await import('@supabase/supabase-js');
-        const supabase = mod.createClient(SUPABASE_URL, SUPABASE_KEY);
-        await supabase.from('system_switches').update({ [dbName]: newState, updated_at: new Date().toISOString() }).eq('device_id', DEVICE_ID);
-      }
-      await axios.post(`${API_BASE}/telemetry/system-switches/${DEVICE_ID}/toggle`, {
+      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
         pumpName: dbName,
         state: newState
-      }).catch(() => {});
+      });
       setTimeout(() => refetchLogs(), 500);
     } catch (e) {
       console.error('Failed to toggle pump', e);
@@ -390,8 +379,8 @@ export default function SystemControlPage() {
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-1">
-                <span>Default system password: <code className="text-emerald-400 font-mono bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-800/50">admin123</code></span>
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                This defaults to your account login password until you set a separate one below.
               </p>
             </div>
 

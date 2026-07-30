@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Lock, User, Mail, ShieldCheck, Key, ArrowLeft, CheckCircle2, Bell, RefreshCw, Phone, Smartphone, MessageSquare } from 'lucide-react';
 import Link from 'next/link';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 
 const maskPhone = (phone: string) => {
   if (!phone) return '•••• ••• ••••';
@@ -51,7 +51,7 @@ export default function LoginPage() {
 
     try {
       // 1. Strictly route through secure backend API (enforces rate limits & generates server-side OTP)
-      const res = await axios.post('http://localhost:3001/api/v1/telemetry/auth/login', {
+      const res = await apiClient.post('/telemetry/auth/login', {
         username: username.trim(),
         password: password,
       });
@@ -83,7 +83,7 @@ export default function LoginPage() {
 
     try {
       const targetIdentifier = pendingUser?.email || pendingUser?.username || username;
-      const res = await axios.post('http://localhost:3001/api/v1/telemetry/auth/verify-otp', {
+      const res = await apiClient.post('/telemetry/auth/verify-otp', {
         emailOrUsername: targetIdentifier,
         code: otpCode.trim()
       });
@@ -128,7 +128,7 @@ export default function LoginPage() {
 
     try {
       const targetIdentifier = pendingUser?.email || pendingUser?.username || username;
-      const res = await axios.post('http://localhost:3001/api/v1/telemetry/auth/resend-otp', {
+      const res = await apiClient.post('/telemetry/auth/resend-otp', {
         emailOrUsername: targetIdentifier
       });
 

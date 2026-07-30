@@ -2,10 +2,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 import { Bot, Send, User, Sprout, BrainCircuit, MessageSquare, Plus } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'agribot_receiver_01';
 const DEVICE_NAME = 'Main Field Node';
 
@@ -65,7 +64,7 @@ export default function AiAssistant() {
 
   const loadSessions = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/ai/sessions`);
+      const res = await apiClient.get('/ai/sessions');
       setSessions(res.data);
       // If we don't have an active session, set it to the latest one or generate a new one
       if (!activeSessionId) {
@@ -90,7 +89,7 @@ export default function AiAssistant() {
     if (!activeSessionId) return;
     const fetchHistory = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/ai/history/${activeSessionId}`);
+        const res = await apiClient.get(`/ai/history/${activeSessionId}`);
         if (res.data && res.data.length > 0) {
           const loadedMessages: Message[] = res.data.map((row: any) => ({
             role: row.role === 'assistant' ? 'ai' : 'user',
@@ -139,7 +138,7 @@ export default function AiAssistant() {
     setIsLoading(true);
 
     try {
-      const res = await axios.post(`${API_BASE}/ai/chat`, {
+      const res = await apiClient.post('/ai/chat', {
         query: userMsg.content,
         deviceId: DEVICE_ID,
         sessionId: activeSessionId,

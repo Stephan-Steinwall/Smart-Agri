@@ -70,6 +70,18 @@ class EvaluateResponse(BaseModel):
     training_origin: str
     warning: str
 
+class RankRequest(BaseModel):
+    soil_ph: float = Field(..., ge=0.0, le=14.0, description="Soil pH reading (0-14)")
+    temperature_c: float = Field(..., ge=-20.0, le=60.0, description="Soil temperature in Celsius")
+    soil_conductivity_dsm: float = Field(..., ge=0.0, description="Electrical conductivity in dS/m")
+    moisture_paw_percent: float = Field(..., ge=0.0, le=100.0, description="Plant available water percentage (0-100)")
+
+class RankResponse(BaseModel):
+    rankings: List[CropRecommendationScore]
+    model_version: str
+    training_origin: str
+    warning: str
+
 @app.get("/health", tags=["Health"])
 async def health_check():
     """
@@ -178,4 +190,56 @@ async def evaluate_soil(request: EvaluateRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred during soil evaluation: {str(e)}"
+        )
+
+@app.post("/rank", response_model=RankResponse, tags=["Evaluation"])
+async def rank_crops(request: RankRequest):
+    """
+    Rank every supported crop against the reference model for a soil profile,
+    without requiring a pre-selected crop. Used to power broad "what should I
+    plant" suggestions (as opposed to /evaluate, which scores one chosen crop
+    against decision thresholds).
+    """
+    if "model" not in model_package or model_package["model"] is None:
+        load_model()
+        if "model" not in model_package or model_package["model"] is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Agronomic reference model is not loaded or trained yet. Please train the model."
+            )
+
+    model = model_package["model"]
+    features = model_package["features"]
+    classes = model_package["classes"]
+    model_version = model_package.get("model_version", "reference_rf_v1")
+    training_origin = model_package.get("training_origin", "reference_generated")
+    warning_msg = model_package.get("warning", "PROTOTYPE WARNING: Trained from generated agronomic ranges.")
+
+    try:
+        input_data = pd.DataFrame([{
+            "soil_ph": request.soil_ph,
+            "temperature_c": request.temperature_c,
+            "soil_conductivity_dsm": request.soil_conductivity_dsm,
+            "moisture_paw_percent": request.moisture_paw_percent
+        }])[features]
+
+        probas = model.predict_proba(input_data)[0]
+
+        rankings = [
+            {"crop": crop_name, "reference_score": round(float(prob) * 100.0, 1)}
+            for crop_name, prob in zip(classes, probas)
+        ]
+        rankings.sort(key=lambda x: x["reference_score"], reverse=True)
+
+        return RankResponse(
+            rankings=[CropRecommendationScore(**item) for item in rankings],
+            model_version=model_version,
+            training_origin=training_origin,
+            warning=warning_msg
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while ranking crops: {str(e)}"
         )
