@@ -213,19 +213,10 @@ create table if not exists public.rain_predictions (
   constraint rain_predictions_pkey primary key (device_id)
 );
 
--- ── ai_chat_history ──────────────────────────────────────────────────────────
-create table if not exists public.ai_chat_history (
-  id uuid not null default gen_random_uuid(),
-  session_id text not null,
-  role text not null,
-  content text not null,
-  created_at timestamp with time zone not null default now(),
-  constraint ai_chat_history_pkey primary key (id),
-  constraint ai_chat_history_role_check check (role = any (array['user'::text, 'assistant'::text]))
-);
-
-create index if not exists idx_ai_chat_history_session
-  on public.ai_chat_history using btree (session_id, created_at);
+-- ai_chat_history is NOT part of this reference -- it was never actually
+-- created in the live project (confirmed: querying it returns Postgres error
+-- PGRST205, "could not find the table"). See 04_ai_chat_history.sql, which
+-- must be run explicitly -- it's a real migration, not documentation.
 
 -- ── "Wireless sensor Soil Analysis data" (farmer-labeled samples) ──────────
 create table if not exists public."Wireless sensor Soil Analysis data" (

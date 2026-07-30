@@ -19,6 +19,12 @@ import WeatherWidget from '@/components/WeatherWidget';
 const DEVICE_ID = 'esp32_weather_01';
 const DEVICE_NAME = 'Main Field Node';
 
+// The AI agronomist reads soil telemetry (moisture/NPK/pH), which is only
+// published under the portable soil sensor's device id -- DEVICE_ID above is
+// the weather station node used for pumps/lights/environment on this page.
+const AI_CHAT_DEVICE_ID = 'agribot_receiver_01';
+const QUICK_CHAT_SESSION_ID = 'dashboard_quick_chat';
+
 type Message = { role: 'user' | 'ai'; content: string; ts?: Date };
 
 // ── Mock Test Data ──────────────────────────────────────────────────────────
@@ -101,12 +107,13 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const [isSystemOn, setIsSystemOn] = useState(true);
 
+  const WELCOME_MESSAGE: Message = { role: 'ai', content: "Hello! I'm your AI Agronomist. Ask me anything about your current dashboard data." };
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'ai', content: "Hello! I'm your AI Agronomist. Ask me anything about your current dashboard data." }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [isChatHistoryLoaded, setIsChatHistoryLoaded] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -114,6 +121,30 @@ export default function Dashboard() {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isChatOpen]);
+
+  // Restore the persisted conversation the first time the widget is opened,
+  // instead of always starting from a blank welcome message. Reuses the same
+  // ai_chat_history table and /ai/history endpoint the full AI Assistant
+  // page already uses -- this quick-chat widget just never called it before.
+  useEffect(() => {
+    if (!isChatOpen || isChatHistoryLoaded) return;
+    setIsChatHistoryLoaded(true);
+
+    (async () => {
+      try {
+        const res = await apiClient.get(`/ai/history/${QUICK_CHAT_SESSION_ID}`);
+        if (res.data && res.data.length > 0) {
+          setMessages(res.data.map((row: any) => ({
+            role: row.role === 'assistant' ? 'ai' : 'user',
+            content: row.content,
+            ts: new Date(row.created_at),
+          })));
+        }
+      } catch (error) {
+        // Backend offline or no history yet -- keep the welcome message.
+      }
+    })();
+  }, [isChatOpen, isChatHistoryLoaded]);
 
   const sendQuickMessage = async () => {
     if (!chatInput.trim() || isChatLoading) return;
@@ -125,8 +156,8 @@ export default function Dashboard() {
     try {
       const res = await apiClient.post('/ai/chat', {
         query: userMsg.content,
-        deviceId: DEVICE_ID,
-        sessionId: 'dashboard_quick_chat',
+        deviceId: AI_CHAT_DEVICE_ID,
+        sessionId: QUICK_CHAT_SESSION_ID,
       });
       setMessages(prev => [
         ...prev,

@@ -526,6 +526,14 @@ export default function AnalyzeDataPage() {
         cropName: cropQuery.trim(),
       });
 
+      // A failed evaluation still comes back as 200 OK with an `error` field
+      // (e.g. the ML model service is unreachable) -- surface it as an error
+      // instead of silently rendering a blank "Wait and amend" card.
+      if (res.data?.error) {
+        setCropEvaluateError(res.data.error);
+        return;
+      }
+
       setCropEvaluation({
         ...res.data,
         isCalibrated: pawRes.isCalibrated,
@@ -648,6 +656,11 @@ export default function AnalyzeDataPage() {
       });
 
       const evalData = res.data;
+
+      if (evalData?.error) {
+        alert(`Unable to evaluate "${item.label}": ${evalData.error}`);
+        return;
+      }
 
       // Update that specific row in public."Wireless sensor Soil Analysis data"
       await apiClient.post('/telemetry/update-analysis-evaluation', {
