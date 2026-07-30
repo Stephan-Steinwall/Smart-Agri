@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   User, Mail, Phone, Shield, LogOut, Check, X, Key, Sparkles, Save, RefreshCw, Lock, Globe, CheckCircle2
 } from 'lucide-react';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 
 const COUNTRY_CODES = [
   { code: '+94', country: 'Sri Lanka', flag: '🇱🇰', placeholder: '77 494 5542', len: 9 },
@@ -103,7 +103,7 @@ export default function AccountManagement() {
     setVerifyingSysPass(true);
     setSysPassError('');
     try {
-      const res = await axios.post('http://localhost:3001/api/v1/telemetry/auth/verify-account-password', {
+      const res = await apiClient.post('/telemetry/auth/verify-account-password', {
         emailOrUsername: email || username,
         accountPassword: inputAccountPasswordForSys
       });
@@ -127,7 +127,7 @@ export default function AccountManagement() {
     setVerifyingSysPass(true);
     setSysPassError('');
     try {
-      const res = await axios.post('http://localhost:3001/api/v1/telemetry/auth/verify-system-control', {
+      const res = await apiClient.post('/telemetry/auth/verify-system-control', {
         emailOrUsername: email || username,
         password: inputOldSystemPassword
       });
@@ -155,7 +155,7 @@ export default function AccountManagement() {
     setVerifyingSysPass(true);
     setSysPassError('');
     try {
-      const res = await axios.post('http://localhost:3001/api/v1/telemetry/auth/update-system-control-password', {
+      const res = await apiClient.post('/telemetry/auth/update-system-control-password', {
         emailOrUsername: email || username,
         accountPassword: inputAccountPasswordForSys,
         oldSystemPassword: inputOldSystemPassword,
@@ -197,7 +197,7 @@ export default function AccountManagement() {
     const fullPhone = `${countryCode}${cleanDigits}`;
 
     try {
-      const res = await axios.post('http://localhost:3001/api/v1/telemetry/auth/update-account', {
+      const res = await apiClient.post('/telemetry/auth/update-account', {
         oldEmail: originalEmail,
         email: email.trim(),
         fullName: fullName.trim(),
@@ -220,19 +220,17 @@ export default function AccountManagement() {
     }
 
     try {
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://aellbyudkunnihocypsb.supabase.co';
-      const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_h-W27NQ6Gu3KMXJi1E8zdA_oMBzCQav';
+      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       if (SUPABASE_URL && SUPABASE_KEY) {
         const mod = await import('@supabase/supabase-js');
         const supabase = mod.createClient(SUPABASE_URL, SUPABASE_KEY);
         await supabase
           .from('user_accounts')
           .update({
-            full_name: fullName.trim(),
             username: username.trim(),
             email: email.trim(),
             phone: fullPhone,
-            phone_number: fullPhone,
           })
           .eq('email', originalEmail);
       }

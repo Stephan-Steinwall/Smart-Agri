@@ -1,14 +1,25 @@
-import { Controller, Post, Body, Get, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AiService } from './ai.service';
+import { AuthGuard } from '../auth/auth.guard';
+import { ChatDto } from './dto/chat.dto';
+import { EvaluateCropDto } from './dto/evaluate-crop.dto';
+import { ToggleRainPredictionDto } from './dto/toggle-rain-prediction.dto';
 
+@UseGuards(AuthGuard)
 @Controller('ai')
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
   @Post('chat')
-  async chat(
-    @Body() body: { query: string; deviceId: string; sessionId: string },
-  ) {
+  async chat(@Body() body: ChatDto) {
     return this.aiService.askAgronomist(
       body.query,
       body.deviceId,
@@ -27,8 +38,12 @@ export class AiController {
   }
 
   @Post('evaluate-crop')
-  async evaluateCrop(@Body() body: { deviceId: string; cropName: string }) {
-    return this.aiService.evaluateCrop(body.deviceId, body.cropName);
+  async evaluateCrop(@Body() body: EvaluateCropDto) {
+    return this.aiService.evaluateCrop(
+      body.deviceId,
+      body.cropName,
+      body.soilMetrics,
+    );
   }
 
   @Get('sessions')
@@ -47,16 +62,17 @@ export class AiController {
     @Query('lat') lat?: string,
     @Query('lon') lon?: string,
   ) {
-    // Default to a farm location if lat/lon not provided
-    const latitude = lat ? parseFloat(lat) : 19.0760;
-    const longitude = lon ? parseFloat(lon) : 72.8777;
-    return this.aiService.predictRain(deviceId, latitude, longitude);
+    return this.aiService.predictRain(
+      deviceId,
+      lat ? parseFloat(lat) : undefined,
+      lon ? parseFloat(lon) : undefined,
+    );
   }
 
   @Post('rain-prediction/:deviceId/toggle')
   async toggleRainPrediction(
     @Param('deviceId') deviceId: string,
-    @Body() body: { enabled: boolean },
+    @Body() body: ToggleRainPredictionDto,
   ) {
     return this.aiService.toggleRainPrediction(deviceId, body.enabled);
   }

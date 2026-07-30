@@ -13,6 +13,7 @@ import {
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
+import { apiClient } from '@/lib/api';
 import WeatherWidget from '@/components/WeatherWidget';
 
 // (No mock data fallback - real data only)
@@ -84,7 +85,7 @@ export default function LocalWeatherPage() {
     const newState = !isPredictionEnabled;
     setIsPredictionEnabled(newState);
     try {
-      await axios.post('http://localhost:3001/api/v1/ai/rain-prediction/esp32_weather_01/toggle', { enabled: newState });
+      await apiClient.post('/ai/rain-prediction/esp32_weather_01/toggle', { enabled: newState });
     } catch (e: any) {
       console.error("Failed to toggle prediction", e);
       alert("Failed to update database: " + e.message);
@@ -92,6 +93,23 @@ export default function LocalWeatherPage() {
       setIsPredictionEnabled(!newState);
     }
   };
+
+  // Hydrate the toggle from the persisted server-side flag on load, instead
+  // of always assuming "on" -- previously a disabled prediction silently
+  // reset to enabled on every page refresh because nothing read this back.
+  const { data: predictionStatus } = useQuery({
+    queryKey: ['rainPredictionStatus'],
+    queryFn: async () => {
+      const res = await apiClient.get('/ai/rain-prediction-status/esp32_weather_01');
+      return res.data;
+    },
+  });
+
+  useEffect(() => {
+    if (predictionStatus && typeof predictionStatus.prediction_enabled === 'boolean') {
+      setIsPredictionEnabled(predictionStatus.prediction_enabled);
+    }
+  }, [predictionStatus]);
 
   const handleLocationSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -167,10 +185,14 @@ export default function LocalWeatherPage() {
     }
   }, []);
 
+  // Deliberately NOT keyed on/sending coords: the AI fusion combines this
+  // with the physical sensor's local pressure/dew-point trend, so it must
+  // always use the fixed farm location (FARM_LATITUDE/FARM_LONGITUDE on the
+  // backend), never whichever city the location box above happens to show.
   const { data: aiPrediction, isLoading: aiLoading, isFetching: aiFetching } = useQuery({
-    queryKey: ['rainPrediction', coords.lat, coords.lon],
+    queryKey: ['rainPrediction'],
     queryFn: async () => {
-      const res = await axios.get(`http://localhost:3001/api/v1/ai/rain-prediction/esp32_weather_01?lat=${coords.lat}&lon=${coords.lon}`);
+      const res = await apiClient.get('/ai/rain-prediction/esp32_weather_01');
       return res.data;
     },
     enabled: isPredictionEnabled,
@@ -181,8 +203,8 @@ export default function LocalWeatherPage() {
     queryKey: ['environmentHistory'],
     queryFn: async () => {
       // 3-second timeout so the page doesn't hang forever if the backend is offline
-      const res = await axios.get('http://localhost:3001/api/v1/telemetry/environment/history/esp32_weather_01', {
-        timeout: 3000 
+      const res = await apiClient.get('/telemetry/environment/history/esp32_weather_01', {
+        timeout: 3000
       });
       return res.data;
     },
@@ -329,7 +351,7 @@ export default function LocalWeatherPage() {
             </div>
             <div>
               <h3 className="font-bold text-lg text-foreground">AI Rain Prediction</h3>
-              <p className="text-sm text-muted-foreground">Synthesized from regional forecast and local telemetry</p>
+              <p className="text-sm text-muted-foreground">Synthesized from the regional forecast and the farm sensor's local telemetry (fixed sensor location, independent of the location search above)</p>
             </div>
           </div>
           

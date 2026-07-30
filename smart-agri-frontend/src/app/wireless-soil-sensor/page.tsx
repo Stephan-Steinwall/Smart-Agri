@@ -3,10 +3,9 @@
 import Link from 'next/link';
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 import { Droplets, Thermometer, Beaker, Zap, Wifi, Activity, Battery, SignalHigh, Leaf, Sprout, FlaskConical, CheckCircle2, ArrowRight, Clock, Server, ShieldCheck } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'agribot_receiver_01';
 const DEVICE_NAME = 'Main Field Node';
 
@@ -33,7 +32,7 @@ export default function WirelessSoilSensorPage() {
   const { data: latestReading, isLoading, isError } = useQuery({
     queryKey: ['wirelessSoilSensorLatest', DEVICE_ID],
     queryFn: async () => {
-      const res = await axios.get(`${API_BASE}/telemetry/latest/${DEVICE_ID}`);
+      const res = await apiClient.get(`/telemetry/latest/${DEVICE_ID}`);
       return res.data;
     },
     refetchInterval: 10000,

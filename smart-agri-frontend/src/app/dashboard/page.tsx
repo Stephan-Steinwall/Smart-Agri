@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 import {
   Activity, Droplets, Thermometer, Sprout,
   BrainCircuit, BarChart2, CloudSun, Beaker, Zap, Leaf, FlaskConical, Target,
@@ -16,7 +16,6 @@ import {
 } from 'recharts';
 import WeatherWidget from '@/components/WeatherWidget';
 
-const API_BASE = 'http://localhost:3001/api/v1';
 const DEVICE_ID = 'esp32_weather_01';
 const DEVICE_NAME = 'Main Field Node';
 
@@ -124,7 +123,7 @@ export default function Dashboard() {
     setIsChatLoading(true);
 
     try {
-      const res = await axios.post(`${API_BASE}/ai/chat`, {
+      const res = await apiClient.post('/ai/chat', {
         query: userMsg.content,
         deviceId: DEVICE_ID,
         sessionId: 'dashboard_quick_chat',
@@ -149,7 +148,7 @@ export default function Dashboard() {
     queryKey: ['systemSwitches', DEVICE_ID],
     queryFn: async () => {
       try {
-        const res = await axios.get(`${API_BASE}/telemetry/system-switches/${DEVICE_ID}`);
+        const res = await apiClient.get(`/telemetry/system-switches/${DEVICE_ID}`);
         return res.data;
       } catch (e) {
         return null;
@@ -174,31 +173,14 @@ export default function Dashboard() {
     );
 
     try {
-      // Direct Supabase update
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (SUPABASE_URL && SUPABASE_KEY) {
-        const mod = await import('@supabase/supabase-js');
-        const supabase = mod.createClient(SUPABASE_URL, SUPABASE_KEY);
-        const { data, error } = await supabase
-          .from('system_switches')
-          .update({ system_switch: newState, updated_at: new Date().toISOString() })
-          .eq('device_id', DEVICE_ID)
-          .select();
-
-        if (!data || data.length === 0) {
-          await supabase.from('system_switches').insert({
-            device_id: DEVICE_ID,
-            system_switch: newState,
-            updated_at: new Date().toISOString()
-          });
-        }
-      }
-      // Also update via backend API
-      await axios.post(`${API_BASE}/telemetry/system-switches/${DEVICE_ID}/toggle`, {
+      // Pump/light control goes through the guarded API only now -- it used
+      // to also write straight to Supabase with the public anon key as an
+      // "optimistic" pre-write, which meant anyone with that key (it ships in
+      // every page load) could flip switches without logging in at all.
+      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
         pumpName: 'system_switch',
         state: newState
-      }).catch(err => console.warn('Backend toggle notification failed:', err.message));
+      });
     } catch (e) {
       console.error('Failed to toggle system switch', e);
       setIsSystemOn(!newState); // revert on complete failure
@@ -213,7 +195,7 @@ export default function Dashboard() {
     queryKey: ['fieldTelemetry', DEVICE_ID],
     queryFn: async () => {
       try {
-        const res = await axios.get(`${API_BASE}/telemetry/dashboard-history/${DEVICE_ID}`);
+        const res = await apiClient.get(`/telemetry/dashboard-history/${DEVICE_ID}`);
         return res.data && res.data.length > 0 ? res.data : TEST_DATA;
       } catch (error) {
         console.warn("Failed to fetch sensor data, using test data.", error);
@@ -228,7 +210,7 @@ export default function Dashboard() {
     queryKey: ['environmentLatest', DEVICE_ID],
     queryFn: async () => {
       try {
-        const res = await axios.get(`${API_BASE}/telemetry/environment/latest/esp32_weather_01`, { timeout: 3000 });
+        const res = await apiClient.get(`/telemetry/environment/latest/esp32_weather_01`, { timeout: 3000 });
         return res.data;
       } catch (error) {
         return null;

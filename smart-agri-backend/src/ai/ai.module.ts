@@ -8,5 +8,6 @@ import { TelemetryModule } from '../telemetry/telemetry.module';
   imports: [TelemetryModule],
   providers: [AiService],
   controllers: [AiController],
+  exports: [AiService],
 })
 export class AiModule {}

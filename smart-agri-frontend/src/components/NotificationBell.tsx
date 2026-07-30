@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import { apiClient } from '@/lib/api';
 import { Bell, AlertTriangle, Info, AlertCircle, CheckCheck, BellOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,6 +18,13 @@ interface Alert {
   message: string;
   severity: AlertSeverity;
   timestamp: string;
+}
+
+interface AlertRow {
+  id: string;
+  message: string;
+  severity: AlertSeverity;
+  created_at: string;
 }
 
 function getSeverityConfig(severity: AlertSeverity) {
@@ -55,15 +62,20 @@ export default function NotificationBell() {
   const { data: alerts = [] } = useQuery<Alert[]>({
     queryKey: ['unreadAlerts'],
     queryFn: async () => {
-      const res = await axios.get('http://localhost:3001/api/v1/alerts/unread');
-      return res.data;
+      const res = await apiClient.get<AlertRow[]>('/alerts/unread');
+      return (res.data || []).map((row) => ({
+        id: row.id,
+        message: row.message,
+        severity: row.severity,
+        timestamp: row.created_at,
+      }));
     },
     refetchInterval: 30_000,
   });
 
   const markAsReadMutation = useMutation({
     mutationFn: async (id: string) => {
-      await axios.patch(`http://localhost:3001/api/v1/alerts/${id}/read`);
+      await apiClient.patch(`/alerts/${id}/read`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['unreadAlerts'] });

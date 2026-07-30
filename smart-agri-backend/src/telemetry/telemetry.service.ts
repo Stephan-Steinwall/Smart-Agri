@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcryptjs';
 import { SensorReading } from './entities/sensor-reading.entity';
 import { SupabaseService } from '../supabase/supabase.service';
 import { randomUUID } from 'crypto';
@@ -6,10 +8,60 @@ import { randomUUID } from 'crypto';
 @Injectable()
 export class TelemetryService {
   private readonly logger = new Logger(TelemetryService.name);
-  private loginAttempts = new Map<string, { count: number; lockedUntil: number }>();
-  private otpSessions = new Map<string, { code: string; user: any; expiresAt: number; attempts: number }>();
+  private loginAttempts = new Map<
+    string,
+    { count: number; lockedUntil: number }
+  >();
+  private otpSessions = new Map<
+    string,
+    { code: string; user: any; expiresAt: number; attempts: number }
+  >();
 
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly jwtService: JwtService,
+  ) {}
+
+  private isBcryptHash(value: string): boolean {
+    return /^\$2[aby]\$/.test(value);
+  }
+
+  // Verifies a password against a stored value that may still be legacy
+  // plaintext. If it matches as plaintext, transparently rehashes it with
+  // bcrypt and persists the hash so the account is migrated for next time.
+  private async verifyAndMaybeMigratePassword(
+    plain: string,
+    stored: string,
+    matchCol: string,
+    matchVal: string | number,
+    column: 'user_password_hash' | 'system_control_password_hash',
+  ): Promise<boolean> {
+    if (this.isBcryptHash(stored)) {
+      return bcrypt.compare(plain, stored);
+    }
+
+    if (stored !== plain) return false;
+
+    try {
+      const newHash = await bcrypt.hash(plain, 10);
+      const { error } = await this.supabaseService
+        .getClient()
+        .from('user_accounts')
+        .update({ [column]: newHash })
+        .eq(matchCol, matchVal);
+      if (error) {
+        this.logger.warn(
+          `Password migration UPDATE failed for ${matchVal}: ${error.message}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Password migration to bcrypt failed for ${matchVal}: ${err?.message ?? err}`,
+      );
+    }
+
+    return true;
+  }
 
   private clampScore(value: number): number {
     return Math.min(100, Math.max(0, value));
@@ -160,26 +212,30 @@ export class TelemetryService {
 
     if (error) {
       if (error.code !== 'PGRST116') {
-        this.logger.error(`Error fetching new dashboard data for ${deviceId}: ${error.message}`);
+        this.logger.error(
+          `Error fetching new dashboard data for ${deviceId}: ${error.message}`,
+        );
       }
       return [];
     }
 
     // Map to the existing frontend structure so we don't break the UI
-    return (data || []).map(row => ({
-      id: row.id,
-      device_id: row.device_id,
-      moisture: row.soil_moisture_percent,
-      temperature: row.soil_temperature_celsius,
-      ph: row.soil_ph,
-      electricalConductivity: row.conductivity,
-      nitrogen: row.nitrogen,
-      phosphorus: row.phosphorus,
-      potassium: row.potassium,
-      tds: row.tds_mg_l,
-      salinity: row.salinity,
-      time: row.created_at,
-    })).reverse();
+    return (data || [])
+      .map((row) => ({
+        id: row.id,
+        device_id: row.device_id,
+        moisture: row.soil_moisture_percent,
+        temperature: row.soil_temperature_celsius,
+        ph: row.soil_ph,
+        electricalConductivity: row.conductivity,
+        nitrogen: row.nitrogen,
+        phosphorus: row.phosphorus,
+        potassium: row.potassium,
+        tds: row.tds_mg_l,
+        salinity: row.salinity,
+        time: row.created_at,
+      }))
+      .reverse();
   }
 
   // --- ENVIRONMENT SENSOR READINGS ---
@@ -195,7 +251,8 @@ export class TelemetryService {
       .single();
 
     if (error) {
-      if (error.code !== 'PGRST116') { // Ignore "no rows returned" error
+      if (error.code !== 'PGRST116') {
+        // Ignore "no rows returned" error
         this.logger.error(
           `Error fetching latest environment reading for ${deviceId}: ${error.message}`,
         );
@@ -244,7 +301,8 @@ export class TelemetryService {
   async saveAnalysis(payload: any): Promise<any> {
     try {
       const row = {
-        soil_sample_label: payload.soil_sample_label ?? payload.label ?? 'Unnamed Analysis',
+        soil_sample_label:
+          payload.soil_sample_label ?? payload.label ?? 'Unnamed Analysis',
         crop_label: payload.crop_label ?? payload.cropLabel ?? null,
         soil_moisture:
           payload.soil_moisture ?? payload.soilMetrics?.moisture ?? 0,
@@ -252,9 +310,7 @@ export class TelemetryService {
           payload.temperature ?? payload.soilMetrics?.temperature ?? 0,
         soil_ph: payload.soil_ph ?? payload.soilMetrics?.ph ?? 7,
         soil_conductivity:
-          payload.soil_conductivity ??
-          payload.soilMetrics?.conductivity ??
-          0,
+          payload.soil_conductivity ?? payload.soilMetrics?.conductivity ?? 0,
         soil_health_score:
           payload.soil_health_score ?? payload.soilHealthScore ?? null,
         nitrogen: payload.nitrogen ?? payload.soilMetrics?.nitrogen ?? null,
@@ -269,8 +325,10 @@ export class TelemetryService {
           payload.recommendation_reason ?? payload.recommendationReason ?? null,
         device_id:
           payload.deviceId ?? payload.device_id ?? 'agribot_receiver_01',
-        reading_at: payload.reading_at ?? payload.readingAt ?? new Date().toISOString(),
-        prediction_confidence: payload.prediction_confidence ?? payload.predictionConfidence ?? null,
+        reading_at:
+          payload.reading_at ?? payload.readingAt ?? new Date().toISOString(),
+        prediction_confidence:
+          payload.prediction_confidence ?? payload.predictionConfidence ?? null,
         model_version: payload.model_version ?? payload.modelVersion ?? null,
         label_status: payload.label_status ?? payload.labelStatus ?? 'pending',
         labelled_by: payload.labelled_by ?? payload.labelledBy ?? null,
@@ -308,7 +366,9 @@ export class TelemetryService {
   }): Promise<any> {
     try {
       if (!payload?.id) {
-        throw new Error('Analysis ID is required for updating evaluation results.');
+        throw new Error(
+          'Analysis ID is required for updating evaluation results.',
+        );
       }
       const updateData = {
         recommended_crop: payload.recommended_crop ?? null,
@@ -326,12 +386,16 @@ export class TelemetryService {
         .single();
 
       if (error) {
-        this.logger.error(`Error updating analysis evaluation: ${error.message}`);
+        this.logger.error(
+          `Error updating analysis evaluation: ${error.message}`,
+        );
         throw new Error(error.message);
       }
       return data;
     } catch (err: any) {
-      this.logger.error(`updateAnalysisEvaluation failed: ${err?.message ?? String(err)}`);
+      this.logger.error(
+        `updateAnalysisEvaluation failed: ${err?.message ?? String(err)}`,
+      );
       throw err;
     }
   }
@@ -399,7 +463,7 @@ export class TelemetryService {
     if (error && error.code !== 'PGRST116') {
       this.logger.error(`Error fetching system switches: ${error.message}`);
     }
-    
+
     if (data) {
       return {
         ...data,
@@ -422,7 +486,15 @@ export class TelemetryService {
   }
 
   async toggleSystemSwitch(deviceId: string, pumpName: string, state: boolean) {
-    const validColumns = ['pump_water', 'pump_nitrogen', 'pump_phosphorus', 'pump_potassium', 'system_switch', 'light_01', 'light_02'];
+    const validColumns = [
+      'pump_water',
+      'pump_nitrogen',
+      'pump_phosphorus',
+      'pump_potassium',
+      'system_switch',
+      'light_01',
+      'light_02',
+    ];
     if (!validColumns.includes(pumpName)) {
       throw new Error('Invalid pump name');
     }
@@ -432,7 +504,7 @@ export class TelemetryService {
       .from('system_switches')
       .update({
         [pumpName]: state,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
       .eq('device_id', deviceId)
       .select();
@@ -447,10 +519,12 @@ export class TelemetryService {
         .insert({
           device_id: deviceId,
           [pumpName]: state,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
         });
       if (insertError) {
-        this.logger.error(`Error inserting pump switch: ${insertError.message}`);
+        this.logger.error(
+          `Error inserting pump switch: ${insertError.message}`,
+        );
       }
     }
 
@@ -462,14 +536,17 @@ export class TelemetryService {
 
         if (state === true) {
           // Start a new session
-          const { error: logError } = await client.from('pump_activation_logs').insert({
-            session_id: randomUUID(),
-            device_id: deviceId,
-            pump_name: purePumpName,
-            start_time: new Date().toISOString(),
-            status: 'running',
-          });
-          if (logError) this.logger.error(`Error starting pump log: ${logError.message}`);
+          const { error: logError } = await client
+            .from('pump_activation_logs')
+            .insert({
+              session_id: randomUUID(),
+              device_id: deviceId,
+              pump_name: purePumpName,
+              start_time: new Date().toISOString(),
+              status: 'running',
+            });
+          if (logError)
+            this.logger.error(`Error starting pump log: ${logError.message}`);
         } else {
           // Stop the currently running session
           const { data: runningSession, error: fetchError } = await client
@@ -485,7 +562,9 @@ export class TelemetryService {
           if (runningSession) {
             const endTime = new Date();
             const startTime = new Date(runningSession.start_time);
-            const durationSeconds = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+            const durationSeconds = Math.floor(
+              (endTime.getTime() - startTime.getTime()) / 1000,
+            );
 
             const { error: logError } = await client
               .from('pump_activation_logs')
@@ -496,65 +575,116 @@ export class TelemetryService {
               })
               .eq('session_id', runningSession.session_id);
 
-            if (logError) this.logger.error(`Error completing pump log: ${logError.message}`);
+            if (logError)
+              this.logger.error(
+                `Error completing pump log: ${logError.message}`,
+              );
           }
         }
       } catch (logErr: any) {
-        this.logger.error(`Failed to handle pump activation logs: ${logErr.message}`);
+        this.logger.error(
+          `Failed to handle pump activation logs: ${logErr.message}`,
+        );
       }
     }
-    
+
     return { success: true, pumpName, state };
   }
 
   async login(usernameOrEmail: string, password?: string) {
-    if (!usernameOrEmail) return { success: false, message: 'Email or username is required.' };
+    if (!usernameOrEmail)
+      return { success: false, message: 'Email or username is required.' };
     try {
       const cleanInput = usernameOrEmail.trim().toLowerCase();
-      
+
       // 1. Check Rate Limiting (Brute-force protection)
       const attemptRecord = this.loginAttempts.get(cleanInput);
       if (attemptRecord && attemptRecord.lockedUntil > Date.now()) {
-        const waitMins = Math.ceil((attemptRecord.lockedUntil - Date.now()) / 60000);
-        return { success: false, message: `Account temporarily locked due to too many failed attempts. Please try again in ${waitMins} minute(s).` };
+        const waitMins = Math.ceil(
+          (attemptRecord.lockedUntil - Date.now()) / 60000,
+        );
+        return {
+          success: false,
+          message: `Account temporarily locked due to too many failed attempts. Please try again in ${waitMins} minute(s).`,
+        };
       }
 
       const client = this.supabaseService.getClient();
-      const { data: allUsers, error } = await client.from('user_accounts').select('*');
+      const { data: allUsers, error } = await client
+        .from('user_accounts')
+        .select('*');
       if (error) {
         this.logger.warn(`Error querying user_accounts: ${error.message}`);
         return { success: false, message: `Database error: ${error.message}` };
       }
       if (!allUsers || allUsers.length === 0) {
-        return { success: false, message: 'user_accounts table is empty or account not found.' };
+        return {
+          success: false,
+          message: 'user_accounts table is empty or account not found.',
+        };
       }
 
       const matchedUser = allUsers.find((u) => {
-        const emailMatch = u.email && String(u.email).trim().toLowerCase() === cleanInput;
-        const userMatch = u.username && String(u.username).trim().toLowerCase() === cleanInput;
-        const userEmailMatch = u.user_email && String(u.user_email).trim().toLowerCase() === cleanInput;
-        return emailMatch || userMatch || userEmailMatch;
+        const emailMatch =
+          u.email && String(u.email).trim().toLowerCase() === cleanInput;
+        const userMatch =
+          u.username && String(u.username).trim().toLowerCase() === cleanInput;
+        return emailMatch || userMatch;
       });
 
       if (!matchedUser) {
-        return { success: false, message: 'Account not found in user_accounts table.' };
+        return {
+          success: false,
+          message: 'Account not found in user_accounts table.',
+        };
       }
 
-      const dbPassword =
-        matchedUser.user_password_hash ||
-        matchedUser.password_hash ||
-        matchedUser.password ||
-        matchedUser.user_password;
+      if (matchedUser.account_status === 'disabled') {
+        return {
+          success: false,
+          message: 'This account has been disabled. Contact an administrator.',
+        };
+      }
 
-      if (password && dbPassword && String(dbPassword) !== String(password)) {
-        // Record failed attempt
-        const count = (attemptRecord?.count || 0) + 1;
-        if (count >= 5) {
-          this.loginAttempts.set(cleanInput, { count, lockedUntil: Date.now() + 15 * 60 * 1000 });
-          return { success: false, message: 'Too many failed login attempts. Account locked for 15 minutes.' };
-        } else {
-          this.loginAttempts.set(cleanInput, { count, lockedUntil: 0 });
-          return { success: false, message: `Invalid password. ${5 - count} attempt(s) remaining before lockout.` };
+      const dbPassword = matchedUser.user_password_hash;
+      const matchCol =
+        matchedUser.id != null
+          ? 'id'
+          : matchedUser.email
+            ? 'email'
+            : 'username';
+      const matchVal =
+        matchedUser.id ?? matchedUser.email ?? matchedUser.username;
+
+      if (password && dbPassword) {
+        const passwordOk = await this.verifyAndMaybeMigratePassword(
+          password,
+          String(dbPassword),
+          matchCol,
+          matchVal,
+          'user_password_hash',
+        );
+
+        if (!passwordOk) {
+          // Record failed attempt
+          const count = (attemptRecord?.count || 0) + 1;
+          if (count >= 5) {
+            this.loginAttempts.set(cleanInput, {
+              count,
+              lockedUntil: Date.now() + 15 * 60 * 1000,
+            });
+            return {
+              success: false,
+              message:
+                'Too many failed login attempts. Account locked for 15 minutes.',
+            };
+          } else {
+            this.loginAttempts.set(cleanInput, { count, lockedUntil: 0 });
+            return {
+              success: false,
+              message: `Invalid password. ${5 - count} attempt(s) remaining before lockout.`,
+            };
+          }
         }
       }
 
@@ -563,16 +693,27 @@ export class TelemetryService {
 
       // 2. Generate Server-Side 6-Digit OTP Code
       const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const sessionKey = (matchedUser.email || matchedUser.username || cleanInput).toString().toLowerCase().trim();
-      
+      const sessionKey = (
+        matchedUser.email ||
+        matchedUser.username ||
+        cleanInput
+      )
+        .toString()
+        .toLowerCase()
+        .trim();
+
       this.otpSessions.set(sessionKey, {
         code,
         user: matchedUser,
         expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes expiration
-        attempts: 0
+        attempts: 0,
       });
 
-      const userPhone = matchedUser.phone || matchedUser.phone_number || matchedUser.mobile || '+1 (555) 382-9102';
+      const userPhone =
+        matchedUser.phone ||
+        matchedUser.phone_number ||
+        matchedUser.mobile ||
+        '+1 (555) 382-9102';
       this.sendSms(userPhone, code, matchedUser.email);
 
       // 3. Return sanitized profile (NEVER return password hash or OTP code to the client)
@@ -583,8 +724,8 @@ export class TelemetryService {
           email: matchedUser.email,
           username: matchedUser.username,
           phone: userPhone,
-          full_name: matchedUser.full_name || matchedUser.name
-        }
+          full_name: matchedUser.full_name || matchedUser.name,
+        },
       };
     } catch (err: any) {
       this.logger.error(`Login error: ${err.message}`);
@@ -594,7 +735,9 @@ export class TelemetryService {
 
   async sendSms(phone: string, code: string, userEmail?: string) {
     const targetPhone = phone || '+1 (555) 382-9102';
-    this.logger.log(`[AUTH/OTP SERVICE] Dispatching 2FA verification code [${code}] to ${targetPhone} for ${userEmail || 'user'}`);
+    this.logger.log(
+      `[AUTH/OTP SERVICE] Dispatching 2FA verification code [${code}] to ${targetPhone} for ${userEmail || 'user'}`,
+    );
 
     // 1. WhatsApp Cloud API Check (100% Free Tier - Meta)
     const waPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -604,7 +747,7 @@ export class TelemetryService {
       try {
         const cleanNumber = targetPhone.replace(/[^0-9]/g, '');
         const url = `https://graph.facebook.com/v20.0/${waPhoneId}/messages`;
-        
+
         const payload = {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
@@ -612,14 +755,14 @@ export class TelemetryService {
           type: 'text',
           text: {
             preview_url: false,
-            body: `🔐 *AgriBot Security Verification*\n\nYour login verification code is: *${code}*\n\nDo not share this OTP with anyone.`
-          }
+            body: `🔐 *AgriBot Security Verification*\n\nYour login verification code is: *${code}*\n\nDo not share this OTP with anyone.`,
+          },
         };
 
         const response = await fetch(url, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${waToken}`,
+            Authorization: `Bearer ${waToken}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(payload),
@@ -628,13 +771,25 @@ export class TelemetryService {
         const resJson = await response.json().catch(() => ({}));
 
         if (response.ok) {
-          this.logger.log(`[WHATSAPP SERVICE] Successfully dispatched live WhatsApp OTP via Meta Cloud API to +${cleanNumber}. Meta Response: ${JSON.stringify(resJson)}`);
-          return { success: true, phone: targetPhone, live: true, provider: 'WhatsApp Cloud API', message: 'WhatsApp verification code dispatched!' };
+          this.logger.log(
+            `[WHATSAPP SERVICE] Successfully dispatched live WhatsApp OTP via Meta Cloud API to +${cleanNumber}. Meta Response: ${JSON.stringify(resJson)}`,
+          );
+          return {
+            success: true,
+            phone: targetPhone,
+            live: true,
+            provider: 'WhatsApp Cloud API',
+            message: 'WhatsApp verification code dispatched!',
+          };
         } else {
-          this.logger.warn(`[WHATSAPP SERVICE] Meta API error: ${JSON.stringify(resJson)}. Falling back to cellular SMS/Simulated broadcast.`);
+          this.logger.warn(
+            `[WHATSAPP SERVICE] Meta API error: ${JSON.stringify(resJson)}. Falling back to cellular SMS/Simulated broadcast.`,
+          );
         }
       } catch (err: any) {
-        this.logger.warn(`[WHATSAPP SERVICE] WhatsApp dispatch error: ${err.message}. Falling back...`);
+        this.logger.warn(
+          `[WHATSAPP SERVICE] WhatsApp dispatch error: ${err.message}. Falling back...`,
+        );
       }
     }
 
@@ -649,27 +804,44 @@ export class TelemetryService {
         const params = new URLSearchParams();
         params.append('To', targetPhone);
         params.append('From', fromPhone);
-        params.append('Body', `[AgriBot Security] Your verification code is: ${code}. Do not share this code.`);
+        params.append(
+          'Body',
+          `[AgriBot Security] Your verification code is: ${code}. Do not share this code.`,
+        );
 
-        const authHeader = 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+        const authHeader =
+          'Basic ' +
+          Buffer.from(`${accountSid}:${authToken}`).toString('base64');
         const response = await fetch(url, {
           method: 'POST',
           headers: {
-            'Authorization': authHeader,
+            Authorization: authHeader,
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: params,
         });
 
         if (response.ok) {
-          this.logger.log(`[SMS SERVICE] Successfully dispatched live cellular SMS via Twilio to ${targetPhone}`);
-          return { success: true, phone: targetPhone, live: true, provider: 'Twilio SMS', message: 'Cellular SMS dispatched!' };
+          this.logger.log(
+            `[SMS SERVICE] Successfully dispatched live cellular SMS via Twilio to ${targetPhone}`,
+          );
+          return {
+            success: true,
+            phone: targetPhone,
+            live: true,
+            provider: 'Twilio SMS',
+            message: 'Cellular SMS dispatched!',
+          };
         } else {
           const errText = await response.text();
-          this.logger.warn(`[SMS SERVICE] Twilio dispatch failed: ${errText}. Using simulated broadcast.`);
+          this.logger.warn(
+            `[SMS SERVICE] Twilio dispatch failed: ${errText}. Using simulated broadcast.`,
+          );
         }
       } catch (err: any) {
-        this.logger.warn(`[SMS SERVICE] Live SMS dispatch error: ${err.message}. Using simulated broadcast.`);
+        this.logger.warn(
+          `[SMS SERVICE] Live SMS dispatch error: ${err.message}. Using simulated broadcast.`,
+        );
       }
     }
 
@@ -685,46 +857,77 @@ export class TelemetryService {
   }
 
   async verifyOtp(emailOrUsername: string, code: string) {
-    if (!emailOrUsername || !code) return { success: false, message: 'Email and verification code are required.' };
+    if (!emailOrUsername || !code)
+      return {
+        success: false,
+        message: 'Email and verification code are required.',
+      };
     const sessionKey = emailOrUsername.toString().toLowerCase().trim();
     const session = this.otpSessions.get(sessionKey);
 
     if (!session) {
-      return { success: false, message: 'No active verification session found. Please log in again or click Resend Code.' };
+      return {
+        success: false,
+        message:
+          'No active verification session found. Please log in again or click Resend Code.',
+      };
     }
 
     if (Date.now() > session.expiresAt) {
       this.otpSessions.delete(sessionKey);
-      return { success: false, message: 'Verification code has expired (5-minute limit). Please click Resend Code.' };
+      return {
+        success: false,
+        message:
+          'Verification code has expired (5-minute limit). Please click Resend Code.',
+      };
     }
 
     if (session.attempts >= 5) {
       this.otpSessions.delete(sessionKey);
-      return { success: false, message: 'Too many incorrect verification attempts. For security, please log in again.' };
+      return {
+        success: false,
+        message:
+          'Too many incorrect verification attempts. For security, please log in again.',
+      };
     }
 
     if (String(session.code).trim() !== String(code).trim()) {
       session.attempts += 1;
-      return { success: false, message: `Invalid verification code. ${5 - session.attempts} attempt(s) remaining.` };
+      return {
+        success: false,
+        message: `Invalid verification code. ${5 - session.attempts} attempt(s) remaining.`,
+      };
     }
 
-    // OTP verified! Clear session and return authenticated user object
+    // OTP verified! Clear session and issue a real, signed session token.
     this.otpSessions.delete(sessionKey);
+    const user = session.user;
+    const token = await this.jwtService.signAsync({
+      sub: user.id ?? user.email ?? user.username,
+      email: user.email,
+      username: user.username,
+    });
+
     return {
       success: true,
-      user: session.user,
-      token: `agribot-secure-jwt-${randomUUID()}`,
-      sessionExpiresAt: Date.now() + 24 * 60 * 60 * 1000 // 24-hour session expiration
+      user,
+      token,
+      sessionExpiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24-hour session expiration (also encoded as the JWT's exp claim)
     };
   }
 
   async resendOtp(emailOrUsername: string) {
-    if (!emailOrUsername) return { success: false, message: 'Email or username is required.' };
+    if (!emailOrUsername)
+      return { success: false, message: 'Email or username is required.' };
     const sessionKey = emailOrUsername.toString().toLowerCase().trim();
     const session = this.otpSessions.get(sessionKey);
 
     if (!session || !session.user) {
-      return { success: false, message: 'Your session has expired. Please return to Step 1 and log in again.' };
+      return {
+        success: false,
+        message:
+          'Your session has expired. Please return to Step 1 and log in again.',
+      };
     }
 
     const newCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -732,19 +935,39 @@ export class TelemetryService {
     session.expiresAt = Date.now() + 5 * 60 * 1000;
     session.attempts = 0;
 
-    const userPhone = session.user.phone || session.user.phone_number || session.user.mobile || '+1 (555) 382-9102';
+    const userPhone =
+      session.user.phone ||
+      session.user.phone_number ||
+      session.user.mobile ||
+      '+1 (555) 382-9102';
     await this.sendSms(userPhone, newCode, session.user.email);
 
-    return { success: true, message: 'New verification code dispatched to your WhatsApp / SMS.' };
+    return {
+      success: true,
+      message: 'New verification code dispatched to your WhatsApp / SMS.',
+    };
   }
 
-  async updateAccount(body: { email?: string; oldEmail?: string; fullName?: string; username?: string; phone?: string }) {
-    this.logger.log(`[AUTH SERVICE] Updating user account for ${body.oldEmail || body.email || body.username}`);
+  async updateAccount(body: {
+    email?: string;
+    oldEmail?: string;
+    fullName?: string;
+    username?: string;
+    phone?: string;
+  }) {
+    this.logger.log(
+      `[AUTH SERVICE] Updating user account for ${body.oldEmail || body.email || body.username}`,
+    );
     try {
       const client = this.supabaseService.getClient();
-      const { data: allUsers, error: fetchErr } = await client.from('user_accounts').select('*');
+      const { data: allUsers, error: fetchErr } = await client
+        .from('user_accounts')
+        .select('*');
       if (fetchErr || !allUsers || allUsers.length === 0) {
-        return { success: false, message: 'Could not fetch user_accounts table.' };
+        return {
+          success: false,
+          message: 'Could not fetch user_accounts table.',
+        };
       }
 
       const cleanOld = body.oldEmail ? body.oldEmail.trim().toLowerCase() : '';
@@ -754,10 +977,15 @@ export class TelemetryService {
       let target = allUsers.find((u: any) => {
         const uEmail = u.email ? String(u.email).trim().toLowerCase() : '';
         const uUser = u.username ? String(u.username).trim().toLowerCase() : '';
-        const uUserEmail = u.user_email ? String(u.user_email).trim().toLowerCase() : '';
-        return (cleanOld && (uEmail === cleanOld || uUserEmail === cleanOld)) ||
-               (cleanEmail && (uEmail === cleanEmail || uUserEmail === cleanEmail)) ||
-               (cleanUser && uUser === cleanUser);
+        const uUserEmail = u.user_email
+          ? String(u.user_email).trim().toLowerCase()
+          : '';
+        return (
+          (cleanOld && (uEmail === cleanOld || uUserEmail === cleanOld)) ||
+          (cleanEmail &&
+            (uEmail === cleanEmail || uUserEmail === cleanEmail)) ||
+          (cleanUser && uUser === cleanUser)
+        );
       });
 
       if (!target && allUsers.length === 1) {
@@ -765,7 +993,10 @@ export class TelemetryService {
       }
 
       if (!target) {
-        return { success: false, message: 'Matching user account not found in database.' };
+        return {
+          success: false,
+          message: 'Matching user account not found in database.',
+        };
       }
 
       const updatePayload: any = {};
@@ -773,7 +1004,8 @@ export class TelemetryService {
         if ('full_name' in target) updatePayload.full_name = body.fullName;
         if ('name' in target) updatePayload.name = body.fullName;
       }
-      if (body.username && 'username' in target) updatePayload.username = body.username;
+      if (body.username && 'username' in target)
+        updatePayload.username = body.username;
       if (body.email) {
         if ('email' in target) updatePayload.email = body.email;
         if ('user_email' in target) updatePayload.user_email = body.email;
@@ -783,13 +1015,18 @@ export class TelemetryService {
         if ('phone_number' in target) updatePayload.phone_number = body.phone;
         if ('mobile' in target) updatePayload.mobile = body.phone;
         if ('contact_no' in target) updatePayload.contact_no = body.phone;
-        if (!('phone' in target) && !('phone_number' in target) && !('mobile' in target)) {
+        if (
+          !('phone' in target) &&
+          !('phone_number' in target) &&
+          !('mobile' in target)
+        ) {
           updatePayload.phone = body.phone;
         }
       }
-      if ('updated_at' in target) updatePayload.updated_at = new Date().toISOString();
+      if ('updated_at' in target)
+        updatePayload.updated_at = new Date().toISOString();
 
-      const matchCol = target.id ? 'id' : (target.email ? 'email' : 'username');
+      const matchCol = target.id ? 'id' : target.email ? 'email' : 'username';
       const matchVal = target.id || target.email || target.username;
 
       const { data: updated, error: updateErr } = await client
@@ -803,64 +1040,115 @@ export class TelemetryService {
         return { success: false, message: updateErr.message };
       }
 
-      const updatedUser = (updated && updated.length > 0) ? updated[0] : { ...target, ...updatePayload };
-      return { success: true, user: updatedUser, message: 'Account updated successfully in database!' };
+      const updatedUser =
+        updated && updated.length > 0
+          ? updated[0]
+          : { ...target, ...updatePayload };
+      return {
+        success: true,
+        user: updatedUser,
+        message: 'Account updated successfully in database!',
+      };
     } catch (err: any) {
       this.logger.error(`updateAccount error: ${err.message}`);
       return { success: false, message: err.message };
     }
   }
 
-  async verifySystemControlPassword(emailOrUsername: string, password?: string) {
-    if (!password) return { success: false, message: 'System Control security password is required.' };
+  async verifySystemControlPassword(
+    emailOrUsername: string,
+    password?: string,
+  ) {
+    if (!password)
+      return {
+        success: false,
+        message: 'System Control security password is required.',
+      };
     try {
       const client = this.supabaseService.getClient();
-      const { data: allUsers, error } = await client.from('user_accounts').select('*');
+      const { data: allUsers, error } = await client
+        .from('user_accounts')
+        .select('*');
       if (error) {
-        this.logger.warn(`Error querying user_accounts for system control verification: ${error.message}`);
+        this.logger.warn(
+          `Error querying user_accounts for system control verification: ${error.message}`,
+        );
         return { success: false, message: `Database error: ${error.message}` };
       }
       if (!allUsers || allUsers.length === 0) {
-        return { success: false, message: 'user_accounts table is empty or account not found.' };
+        return {
+          success: false,
+          message: 'user_accounts table is empty or account not found.',
+        };
       }
 
       let matchedUser = null;
       if (emailOrUsername) {
         const cleanInput = emailOrUsername.trim().toLowerCase();
         matchedUser = allUsers.find((u) => {
-          const emailMatch = u.email && String(u.email).trim().toLowerCase() === cleanInput;
-          const userMatch = u.username && String(u.username).trim().toLowerCase() === cleanInput;
-          const userEmailMatch = u.user_email && String(u.user_email).trim().toLowerCase() === cleanInput;
-          return emailMatch || userMatch || userEmailMatch;
+          const emailMatch =
+            u.email && String(u.email).trim().toLowerCase() === cleanInput;
+          const userMatch =
+            u.username &&
+            String(u.username).trim().toLowerCase() === cleanInput;
+          return emailMatch || userMatch;
         });
       }
 
       const targetUser = matchedUser || allUsers[0];
-      const dbSystemPassword =
-        targetUser?.system_control_password_hash ||
-        targetUser?.system_control_password ||
-        targetUser?.sys_password ||
-        targetUser?.user_password_hash ||
-        targetUser?.password ||
-        'admin123';
+      const dbSystemPassword = targetUser?.system_control_password_hash;
 
-      if (String(dbSystemPassword) === String(password) || String(password) === 'admin123' || (targetUser?.password && String(targetUser.password) === String(password))) {
-        this.logger.log(`[SECURITY] System Control unlocked for user: ${targetUser?.email || targetUser?.username || 'admin'}`);
-        return { success: true, message: 'System Control center unlocked successfully!' };
+      if (!dbSystemPassword) {
+        return {
+          success: false,
+          message:
+            'System Control password is not configured for this account.',
+        };
       }
 
-      return { success: false, message: 'Invalid System Control security password.' };
+      const matchCol =
+        targetUser.id != null ? 'id' : targetUser.email ? 'email' : 'username';
+      const matchVal = targetUser.id ?? targetUser.email ?? targetUser.username;
+
+      const passwordOk = await this.verifyAndMaybeMigratePassword(
+        password,
+        String(dbSystemPassword),
+        matchCol,
+        matchVal,
+        'system_control_password_hash',
+      );
+
+      if (passwordOk) {
+        this.logger.log(
+          `[SECURITY] System Control unlocked for user: ${targetUser?.email || targetUser?.username || 'unknown'}`,
+        );
+        return {
+          success: true,
+          message: 'System Control center unlocked successfully!',
+        };
+      }
+
+      return {
+        success: false,
+        message: 'Invalid System Control security password.',
+      };
     } catch (err: any) {
       this.logger.error(`verifySystemControlPassword error: ${err.message}`);
       return { success: false, message: err.message };
     }
   }
 
-  async verifyAccountPassword(emailOrUsername: string, accountPassword?: string) {
-    if (!accountPassword) return { success: false, message: 'Account login password is required.' };
+  async verifyAccountPassword(
+    emailOrUsername: string,
+    accountPassword?: string,
+  ) {
+    if (!accountPassword)
+      return { success: false, message: 'Account login password is required.' };
     try {
       const client = this.supabaseService.getClient();
-      const { data: allUsers, error } = await client.from('user_accounts').select('*');
+      const { data: allUsers, error } = await client
+        .from('user_accounts')
+        .select('*');
       if (error) {
         return { success: false, message: `Database error: ${error.message}` };
       }
@@ -872,18 +1160,38 @@ export class TelemetryService {
       if (emailOrUsername) {
         const cleanInput = emailOrUsername.trim().toLowerCase();
         matchedUser = allUsers.find((u) => {
-          const emailMatch = u.email && String(u.email).trim().toLowerCase() === cleanInput;
-          const userMatch = u.username && String(u.username).trim().toLowerCase() === cleanInput;
-          const userEmailMatch = u.user_email && String(u.user_email).trim().toLowerCase() === cleanInput;
-          return emailMatch || userMatch || userEmailMatch;
+          const emailMatch =
+            u.email && String(u.email).trim().toLowerCase() === cleanInput;
+          const userMatch =
+            u.username &&
+            String(u.username).trim().toLowerCase() === cleanInput;
+          return emailMatch || userMatch;
         });
       }
 
       const targetUser = matchedUser || allUsers[0];
-      const dbPassword = targetUser?.user_password_hash || targetUser?.password || targetUser?.user_password;
+      const dbPassword = targetUser?.user_password_hash;
+      if (!dbPassword) {
+        return { success: false, message: 'Incorrect account login password.' };
+      }
 
-      if (String(dbPassword) === String(accountPassword) || (targetUser?.password && String(targetUser.password) === String(accountPassword))) {
-        return { success: true, message: 'Account password verified successfully!' };
+      const matchCol =
+        targetUser.id != null ? 'id' : targetUser.email ? 'email' : 'username';
+      const matchVal = targetUser.id ?? targetUser.email ?? targetUser.username;
+
+      const passwordOk = await this.verifyAndMaybeMigratePassword(
+        accountPassword,
+        String(dbPassword),
+        matchCol,
+        matchVal,
+        'user_password_hash',
+      );
+
+      if (passwordOk) {
+        return {
+          success: true,
+          message: 'Account password verified successfully!',
+        };
       }
 
       return { success: false, message: 'Incorrect account login password.' };
@@ -892,19 +1200,37 @@ export class TelemetryService {
     }
   }
 
-  async updateSystemControlPassword(emailOrUsername: string, accountPassword?: string, oldSystemPassword?: string, newSystemPassword?: string) {
+  async updateSystemControlPassword(
+    emailOrUsername: string,
+    accountPassword?: string,
+    oldSystemPassword?: string,
+    newSystemPassword?: string,
+  ) {
     if (!accountPassword || !oldSystemPassword || !newSystemPassword) {
       return { success: false, message: 'All password fields are required.' };
     }
     try {
-      const accCheck = await this.verifyAccountPassword(emailOrUsername, accountPassword);
+      const accCheck = await this.verifyAccountPassword(
+        emailOrUsername,
+        accountPassword,
+      );
       if (!accCheck.success) {
-        return { success: false, message: 'Account login password verification failed. Cannot change system control password.' };
+        return {
+          success: false,
+          message:
+            'Account login password verification failed. Cannot change system control password.',
+        };
       }
 
-      const sysCheck = await this.verifySystemControlPassword(emailOrUsername, oldSystemPassword);
+      const sysCheck = await this.verifySystemControlPassword(
+        emailOrUsername,
+        oldSystemPassword,
+      );
       if (!sysCheck.success) {
-        return { success: false, message: 'Old System Control password verification failed.' };
+        return {
+          success: false,
+          message: 'Old System Control password verification failed.',
+        };
       }
 
       const client = this.supabaseService.getClient();
@@ -913,21 +1239,25 @@ export class TelemetryService {
       if (emailOrUsername && allUsers) {
         const cleanInput = emailOrUsername.trim().toLowerCase();
         matchedUser = allUsers.find((u) => {
-          const emailMatch = u.email && String(u.email).trim().toLowerCase() === cleanInput;
-          const userMatch = u.username && String(u.username).trim().toLowerCase() === cleanInput;
+          const emailMatch =
+            u.email && String(u.email).trim().toLowerCase() === cleanInput;
+          const userMatch =
+            u.username &&
+            String(u.username).trim().toLowerCase() === cleanInput;
           return emailMatch || userMatch;
         });
       }
       const targetUser = matchedUser || (allUsers && allUsers[0]);
-      if (!targetUser) return { success: false, message: 'Target user account not found.' };
+      if (!targetUser)
+        return { success: false, message: 'Target user account not found.' };
 
-      const matchCol = targetUser.id ? 'id' : (targetUser.email ? 'email' : 'username');
-      const matchVal = targetUser.id || targetUser.email || targetUser.username;
+      const matchCol =
+        targetUser.id != null ? 'id' : targetUser.email ? 'email' : 'username';
+      const matchVal = targetUser.id ?? targetUser.email ?? targetUser.username;
 
       const updatePayload: any = {
-        system_control_password_hash: newSystemPassword
+        system_control_password_hash: await bcrypt.hash(newSystemPassword, 10),
       };
-      if ('system_control_password' in targetUser) updatePayload.system_control_password = newSystemPassword;
 
       const { data: updated, error } = await client
         .from('user_accounts')
@@ -936,17 +1266,25 @@ export class TelemetryService {
         .select();
 
       if (error) {
-        this.logger.error(`Error updating system_control_password_hash: ${error.message}`);
-        return { success: false, message: `Database update error: ${error.message}` };
+        this.logger.error(
+          `Error updating system_control_password_hash: ${error.message}`,
+        );
+        return {
+          success: false,
+          message: `Database update error: ${error.message}`,
+        };
       }
 
-      this.logger.log(`[SECURITY] System Control password updated successfully for: ${matchVal}`);
-      return { success: true, message: 'System Control security password has been updated successfully!' };
+      this.logger.log(
+        `[SECURITY] System Control password updated successfully for: ${matchVal}`,
+      );
+      return {
+        success: true,
+        message:
+          'System Control security password has been updated successfully!',
+      };
     } catch (err: any) {
       return { success: false, message: err.message };
     }
   }
 }
-
-
-

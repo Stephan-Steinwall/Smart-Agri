@@ -4,62 +4,29 @@ import OpenAI from 'openai';
 import { TelemetryService } from '../telemetry/telemetry.service';
 import { SupabaseService } from '../supabase/supabase.service';
 
+interface MlFeatures {
+  soil_ph: number;
+  temperature_c: number;
+  soil_conductivity_dsm: number;
+  moisture_paw_percent: number;
+}
+
+interface CropScore {
+  crop: string;
+  reference_score: number;
+}
+
 @Injectable()
 export class AiService {
   private openai: OpenAI;
   private readonly logger = new Logger(AiService.name);
-  private readonly cropProfiles = [
-    {
-      name: 'Maize',
-      idealMoisture: 58,
-      idealPh: 6.0,
-      idealTemperature: 25,
-      idealNitrogen: 50,
-      idealPhosphorus: 25,
-      idealPotassium: 35,
-      description: 'Thrives in warm, moderately moist soils with balanced NPK.',
-    },
-    {
-      name: 'Rice',
-      idealMoisture: 75,
-      idealPh: 6.0,
-      idealTemperature: 28,
-      idealNitrogen: 45,
-      idealPhosphorus: 20,
-      idealPotassium: 30,
-      description: 'Prefers wetter soil and slightly warmer conditions.',
-    },
-    {
-      name: 'Tomato',
-      idealMoisture: 50,
-      idealPh: 6.3,
-      idealTemperature: 22,
-      idealNitrogen: 40,
-      idealPhosphorus: 20,
-      idealPotassium: 40,
-      description: 'Works well in well-drained, moderately moist soil.',
-    },
-    {
-      name: 'Potato',
-      idealMoisture: 48,
-      idealPh: 5.8,
-      idealTemperature: 18,
-      idealNitrogen: 35,
-      idealPhosphorus: 25,
-      idealPotassium: 45,
-      description: 'Best in cooler soil with balanced nutrients.',
-    },
-    {
-      name: 'Lettuce',
-      idealMoisture: 65,
-      idealPh: 6.2,
-      idealTemperature: 16,
-      idealNitrogen: 30,
-      idealPhosphorus: 15,
-      idealPotassium: 25,
-      description: 'Prefers cooler conditions and consistently moist soil.',
-    },
-  ];
+
+  private readonly mlApiUrl: string;
+  private readonly ecSensorUnit: string;
+  private readonly soilFieldCapacity: number | null;
+  private readonly soilWiltingPoint: number | null;
+  private readonly farmLatitude: number;
+  private readonly farmLongitude: number;
 
   constructor(
     private configService: ConfigService,
@@ -69,6 +36,23 @@ export class AiService {
     this.openai = new OpenAI({
       apiKey: this.configService.get<string>('OPENAI_API_KEY'),
     });
+
+    this.mlApiUrl =
+      this.configService.get<string>('ML_API_URL') || 'http://127.0.0.1:8000';
+    this.ecSensorUnit =
+      this.configService.get<string>('EC_SENSOR_UNIT') || 'dS/m';
+
+    const fieldCapacity = this.configService.get<string>('SOIL_FIELD_CAPACITY');
+    const wiltingPoint = this.configService.get<string>('SOIL_WILTING_POINT');
+    this.soilFieldCapacity = fieldCapacity ? Number(fieldCapacity) : null;
+    this.soilWiltingPoint = wiltingPoint ? Number(wiltingPoint) : null;
+
+    // Fixed physical location of the sensor node, NOT the browser's location.
+    // Defaults match the frontend's old Colombo fallback if unset.
+    this.farmLatitude =
+      Number(this.configService.get<string>('FARM_LATITUDE')) || 6.9271;
+    this.farmLongitude =
+      Number(this.configService.get<string>('FARM_LONGITUDE')) || 79.8612;
   }
 
   async askAgronomist(query: string, deviceId: string, sessionId: string) {
@@ -102,7 +86,7 @@ export class AiService {
     const systemPrompt = `
       You are an expert Agronomy AI Assistant managing a Smart Agriculture Platform.
       You provide concise, professional, and actionable advice to farmers based on raw data.
-      
+
       CURRENT SENSOR DATA CONTEXT:
       - Time of reading: ${latestReading.time}
       - Soil Moisture: ${latestReading.moisture}% (Optimal range: 40-70%)
@@ -111,10 +95,10 @@ export class AiService {
       - Phosphorus (P): ${latestReading.phosphorus} ppm
       - Potassium (K): ${latestReading.potassium} ppm
       - pH Level: ${latestReading.ph}
-      
+
       INSTRUCTIONS:
-      Answer the user's question directly based on the data above. Do not hallucinate data. 
-      If moisture is below 30%, recommend immediate irrigation. 
+      Answer the user's question directly based on the data above. Do not hallucinate data.
+      If moisture is below 30%, recommend immediate irrigation.
       Keep responses concise and actionable.
     `;
 
@@ -161,419 +145,310 @@ export class AiService {
     return { answer };
   }
 
-  private clampScore(value: number): number {
-    return Math.min(100, Math.max(0, value));
+  // ── Crop prediction: RandomForest (ml_backend) scores, OpenAI narrates ────
+
+  // Mirrors smart-agri-frontend's convertEcToDsm/calculatePlantAvailableWater
+  // (wireless-soil-sensor/analyze/page.tsx) so both sides agree on units.
+  private convertEcToDsm(rawEc: number): number {
+    if (this.ecSensorUnit === 'uS/cm') return rawEc / 1000;
+    return rawEc;
   }
 
-  private calculateCropScore(reading: any, profile: any): number {
-    const scores: number[] = [];
-
-    if (reading.moisture != null) {
-      scores.push(
-        this.clampScore(
-          100 - Math.abs(reading.moisture - profile.idealMoisture) * 1.2,
-        ),
-      );
+  private calculatePlantAvailableWater(rawMoisture: number): number {
+    if (
+      this.soilFieldCapacity == null ||
+      this.soilWiltingPoint == null ||
+      this.soilFieldCapacity <= this.soilWiltingPoint
+    ) {
+      return Math.max(0, Math.min(100, rawMoisture));
     }
-    if (reading.ph != null) {
-      scores.push(
-        this.clampScore(100 - Math.abs(reading.ph - profile.idealPh) * 20),
-      );
-    }
-    if (reading.temperature != null) {
-      scores.push(
-        this.clampScore(
-          100 - Math.abs(reading.temperature - profile.idealTemperature) * 2,
-        ),
-      );
-    }
-    if (reading.nitrogen != null) {
-      scores.push(
-        this.clampScore(
-          100 - Math.abs(reading.nitrogen - profile.idealNitrogen) * 1.2,
-        ),
-      );
-    }
-    if (reading.phosphorus != null) {
-      scores.push(
-        this.clampScore(
-          100 - Math.abs(reading.phosphorus - profile.idealPhosphorus) * 2,
-        ),
-      );
-    }
-    if (reading.potassium != null) {
-      scores.push(
-        this.clampScore(
-          100 - Math.abs(reading.potassium - profile.idealPotassium) * 1.4,
-        ),
-      );
-    }
-
-    if (scores.length === 0) {
-      return 0;
-    }
-
-    return Math.round(
-      scores.reduce((sum, score) => sum + score, 0) / scores.length,
-    );
+    const paw =
+      (100 * (rawMoisture - this.soilWiltingPoint)) /
+      (this.soilFieldCapacity - this.soilWiltingPoint);
+    return Math.max(0, Math.min(100, paw));
   }
 
-  private buildCropPrompt(reading: any): string {
-    const lines = [
-      `- Moisture: ${reading.moisture ?? 'unknown'}%`,
-      `- pH: ${reading.ph ?? 'unknown'}`,
-      `- Temperature: ${reading.temperature ?? 'unknown'}°C`,
-      `- Nitrogen (N): ${reading.nitrogen ?? 'unknown'} ppm`,
-      `- Phosphorus (P): ${reading.phosphorus ?? 'unknown'} ppm`,
-      `- Potassium (K): ${reading.potassium ?? 'unknown'} ppm`,
-      `- Soil Conductivity: ${reading.soilConductivity ?? reading.electricalConductivity ?? 'unknown'} dS/m`,
-      `- TDS: ${reading.tds ?? 'unknown'} ppm`,
-      `- Salinity: ${reading.salinity ?? 'unknown'}‰`,
-    ];
-
-    const profileLines = this.cropProfiles
-      .map(
-        (profile) =>
-          `- ${profile.name}: moisture ${profile.idealMoisture}%, pH ${profile.idealPh}, temperature ${profile.idealTemperature}°C, nitrogen ${profile.idealNitrogen} ppm, phosphorus ${profile.idealPhosphorus} ppm, potassium ${profile.idealPotassium} ppm.`,
-      )
-      .join('\n');
-
-    return `You are an expert agronomist. Based on the live soil sensor readings and the crop profiles below, analyze all relevant soil factors including moisture, pH, temperature, nitrogen, phosphorus, potassium, conductivity, TDS, and salinity. Select the best crop match for this field, rank up to two strong alternatives, and provide soil preparation guidance to follow before planting the chosen crop.
-Respond ONLY with valid JSON using this exact structure:
-{
-  "recommendedCrop": {"crop": string, "score": number, "description": string},
-  "alternatives": [{"crop": string, "score": number, "description": string}],
-  "summary": string,
-  "prePlantRecommendations": [string]
-}
-
-Live sensor reading:
-${lines.join('\n')}
-
-Crop profiles:
-${profileLines}
-
-Do not add any extra commentary or fields.`;
-  }
-
-  private buildPrePlantRecommendations(reading: any, profile: any): string[] {
-    const recommendations: string[] = [];
-
-    if (reading.moisture != null) {
-      const diff = reading.moisture - profile.idealMoisture;
-      if (Math.abs(diff) > 5) {
-        recommendations.push(
-          diff > 0
-            ? `Reduce soil moisture toward ${profile.idealMoisture}% before planting ${profile.name}.`
-            : `Increase soil moisture toward ${profile.idealMoisture}% before planting ${profile.name}.`,
-        );
-      } else {
-        recommendations.push(
-          `Keep soil moisture near ${profile.idealMoisture}% before planting.`,
-        );
-      }
-    }
-
-    if (reading.ph != null) {
-      const diff = reading.ph - profile.idealPh;
-      if (Math.abs(diff) > 0.3) {
-        recommendations.push(
-          diff > 0
-            ? `Lower soil pH toward ${profile.idealPh} before planting ${profile.name}.`
-            : `Raise soil pH toward ${profile.idealPh} before planting ${profile.name}.`,
-        );
-      } else {
-        recommendations.push(`Keep soil pH around ${profile.idealPh}.`);
-      }
-    }
-
-    if (reading.nitrogen != null) {
-      const diff = reading.nitrogen - profile.idealNitrogen;
-      if (Math.abs(diff) > 10) {
-        recommendations.push(
-          diff > 0
-            ? `Adjust nitrogen levels down if too high before planting ${profile.name}.`
-            : `Add nitrogen-rich amendments to reach around ${profile.idealNitrogen} ppm.`,
-        );
-      } else {
-        recommendations.push(
-          `Maintain nitrogen near ${profile.idealNitrogen} ppm.`,
-        );
-      }
-    }
-
-    if (reading.phosphorus != null) {
-      const diff = reading.phosphorus - profile.idealPhosphorus;
-      if (Math.abs(diff) > 10) {
-        recommendations.push(
-          diff > 0
-            ? `Lower phosphorus input before planting ${profile.name}.`
-            : `Add phosphorus fertilizer if needed before planting ${profile.name}.`,
-        );
-      } else {
-        recommendations.push(
-          `Keep phosphorus near ${profile.idealPhosphorus} ppm.`,
-        );
-      }
-    }
-
-    if (reading.potassium != null) {
-      const diff = reading.potassium - profile.idealPotassium;
-      if (Math.abs(diff) > 10) {
-        recommendations.push(
-          diff > 0
-            ? `Reduce potassium amendments if current levels are high.`
-            : `Apply potassium-rich fertilizer if levels are low.`,
-        );
-      } else {
-        recommendations.push(
-          `Keep potassium near ${profile.idealPotassium} ppm.`,
-        );
-      }
-    }
-
-    if (recommendations.length === 0) {
-      recommendations.push(
-        `Review soil moisture, pH, and nutrient balance before planting ${profile.name}.`,
-      );
-    }
-
-    return recommendations;
-  }
-
-  private buildEvaluateCropPrompt(reading: any, cropName: string): string {
-    const lines = [
-      `- Moisture: ${reading.moisture ?? 'unknown'}%`,
-      `- pH: ${reading.ph ?? 'unknown'}`,
-      `- Temperature: ${reading.temperature ?? 'unknown'}°C`,
-      `- Nitrogen (N): ${reading.nitrogen ?? 'unknown'} ppm`,
-      `- Phosphorus (P): ${reading.phosphorus ?? 'unknown'} ppm`,
-      `- Potassium (K): ${reading.potassium ?? 'unknown'} ppm`,
-      `- Soil Conductivity: ${reading.soilConductivity ?? reading.electricalConductivity ?? 'unknown'} dS/m`,
-      `- TDS: ${reading.tds ?? 'unknown'} ppm`,
-      `- Salinity: ${reading.salinity ?? 'unknown'}‰`,
-    ];
-
-    return `You are an expert agronomist. Based on the live soil sensor readings below, determine whether the user can plant ${cropName} now. Analyze all relevant soil factors including moisture, pH, temperature, nitrogen, phosphorus, potassium, conductivity, TDS, and salinity. If planting is not recommended, provide the soil adjustments required before planting. Respond ONLY with valid JSON using this exact structure:\n{\n  "cropName": string,\n  "canPlantNow": boolean,\n  "recommendation": string,\n  "reasons": [string],\n  "actions": [string]\n}\n\nLive sensor readings:\n${lines.join('\n')}\nDo not add extra commentary or fields.`;
-  }
-
-  private buildEvaluateCropFallback(reading: any, cropName: string) {
-    const normalizedName = cropName.trim().toLowerCase();
-    const profile = this.cropProfiles.find(
-      (profile) => profile.name.toLowerCase() === normalizedName,
-    );
-    const reasons: string[] = [];
-    const actions: string[] = [];
-    let canPlantNow = false;
-
-    if (profile) {
-      const score = this.calculateCropScore(reading, profile);
-      canPlantNow = score >= 70;
-
-      if (reading.moisture != null) {
-        const diff = reading.moisture - profile.idealMoisture;
-        reasons.push(
-          `Moisture is ${reading.moisture.toFixed(0)}%, ideal for ${profile.name} is ${profile.idealMoisture}%.`,
-        );
-        actions.push(
-          diff > 5
-            ? `Reduce soil moisture to about ${profile.idealMoisture}% before planting ${profile.name}.`
-            : diff < -5
-              ? `Increase moisture to about ${profile.idealMoisture}% before planting ${profile.name}.`
-              : `Maintain moisture near ${profile.idealMoisture}%.`,
-        );
-      }
-      if (reading.ph != null) {
-        const diff = reading.ph - profile.idealPh;
-        reasons.push(
-          `pH is ${reading.ph.toFixed(1)}, ideal for ${profile.name} is ${profile.idealPh}.`,
-        );
-        actions.push(
-          diff > 0.3
-            ? `Lower pH toward ${profile.idealPh} before planting ${profile.name}.`
-            : diff < -0.3
-              ? `Raise pH toward ${profile.idealPh} before planting ${profile.name}.`
-              : `Keep pH around ${profile.idealPh}.`,
-        );
-      }
-      if (reading.nitrogen != null) {
-        const diff = reading.nitrogen - profile.idealNitrogen;
-        actions.push(
-          diff < -10
-            ? `Add nitrogen-rich amendment to reach around ${profile.idealNitrogen} ppm.`
-            : diff > 10
-              ? `Reduce nitrogen input before planting ${profile.name}.`
-              : `Keep nitrogen near ${profile.idealNitrogen} ppm.`,
-        );
-      }
-      if (reading.phosphorus != null) {
-        const diff = reading.phosphorus - profile.idealPhosphorus;
-        actions.push(
-          diff < -10
-            ? `Apply phosphorus fertilizer to reach about ${profile.idealPhosphorus} ppm.`
-            : diff > 10
-              ? `Reduce phosphorus application before planting ${profile.name}.`
-              : `Keep phosphorus near ${profile.idealPhosphorus} ppm.`,
-        );
-      }
-      if (reading.potassium != null) {
-        const diff = reading.potassium - profile.idealPotassium;
-        actions.push(
-          diff < -10
-            ? `Apply potassium-rich fertilizer to reach about ${profile.idealPotassium} ppm.`
-            : diff > 10
-              ? `Reduce potassium amendments before planting ${profile.name}.`
-              : `Keep potassium near ${profile.idealPotassium} ppm.`,
-        );
-      }
-
-      return {
-        cropName: profile.name,
-        canPlantNow,
-        recommendation: canPlantNow
-          ? `Current soil conditions are reasonably aligned for planting ${profile.name}.`
-          : `Current soil conditions are not ideal for planting ${profile.name} yet.`,
-        reasons,
-        actions,
-      };
-    }
+  private resolveMlFeatures(reading: any): MlFeatures {
+    const conductivity =
+      reading.soilConductivity ??
+      reading.electricalConductivity ??
+      reading.conductivity ??
+      0;
 
     return {
-      cropName,
-      canPlantNow: false,
-      recommendation: `No specific profile exists for ${cropName}. Review soil conditions and adjust moisture, pH, and nutrients before planting.`,
-      reasons: [
-        `The crop name could not be matched to a known profile.`,
-        `General soil health factors still determine whether planting is safe.`,
-      ],
-      actions: [
-        `Verify soil moisture and keep it within 40-70%.`,
-        `Adjust pH toward neutral (around 6.0-6.5).`,
-        `Balance nitrogen, phosphorus, and potassium before planting.`,
-      ],
+      soil_ph: reading.ph ?? 7.0,
+      temperature_c: reading.temperature ?? 25.0,
+      soil_conductivity_dsm: this.convertEcToDsm(conductivity),
+      moisture_paw_percent: this.calculatePlantAvailableWater(
+        reading.moisture ?? 50.0,
+      ),
     };
   }
 
-  async evaluateCrop(deviceId: string, cropName: string) {
-    const reading = await this.telemetryService.getLatestReading(deviceId);
+  private async rankCropsViaModel(features: MlFeatures): Promise<CropScore[]> {
+    const response = await fetch(`${this.mlApiUrl}/rank`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(features),
+    });
 
-    if (!reading) {
-      return { error: 'No sensor readings found for this device.' };
-    }
-
-    const prompt = this.buildEvaluateCropPrompt(reading, cropName);
-
-    try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a concise agronomist helping farmers decide whether to plant a specific crop based on soil sensor data.',
-          },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-      });
-
-      const content = response.choices?.[0]?.message?.content;
-      if (content) {
-        const parsed = JSON.parse(content);
-        if (
-          parsed?.cropName &&
-          typeof parsed?.canPlantNow === 'boolean' &&
-          Array.isArray(parsed?.actions)
-        ) {
-          return parsed;
-        }
-      }
-    } catch (error) {
-      this.logger.warn(
-        `AI crop evaluation failed, using fallback analysis: ${error?.message ?? error}`,
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(
+        `ML /rank request failed (${response.status}): ${detail}`,
       );
     }
 
-    return this.buildEvaluateCropFallback(reading, cropName);
+    const data = await response.json();
+    return data.rankings;
+  }
+
+  private async evaluateCropViaModel(
+    features: MlFeatures,
+    cropName: string,
+  ): Promise<any> {
+    const response = await fetch(`${this.mlApiUrl}/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selected_crop: cropName, ...features }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(
+        `ML /evaluate request failed (${response.status}): ${detail}`,
+      );
+    }
+
+    return response.json();
   }
 
   async suggestCrop(deviceId: string) {
     const reading = await this.telemetryService.getLatestReading(deviceId);
-
     if (!reading) {
       return { error: 'No sensor readings found for this device.' };
     }
 
-    const prompt = this.buildCropPrompt(reading);
+    const features = this.resolveMlFeatures(reading);
+
+    let rankings: CropScore[];
+    try {
+      rankings = await this.rankCropsViaModel(features);
+    } catch (error: any) {
+      this.logger.error(
+        `Crop ranking via ML model failed: ${error?.message ?? error}`,
+      );
+      return {
+        error: 'Unable to reach the crop recommendation model right now.',
+      };
+    }
+
+    if (!rankings?.length) {
+      return { error: 'The crop recommendation model returned no rankings.' };
+    }
+
+    const [top, ...rest] = rankings;
+    const alternatives = rest.slice(0, 2);
 
     try {
+      const prompt = `A RandomForest agronomic reference model already scored every supported crop against the current soil reading (0-100, higher = better fit). These scores are final -- explain them, do not invent your own.
+
+Soil reading used:
+- Moisture (plant-available water): ${features.moisture_paw_percent.toFixed(1)}%
+- pH: ${features.soil_ph}
+- Temperature: ${features.temperature_c}°C
+- Conductivity: ${features.soil_conductivity_dsm} dS/m
+
+Model output:
+- Top match: ${top.crop} (${top.reference_score}/100)
+- Alternatives: ${alternatives.map((a) => `${a.crop} (${a.reference_score}/100)`).join(', ') || 'none'}
+
+Respond ONLY with valid JSON using this exact structure:
+{
+  "summary": string (1-2 sentences on why ${top.crop} scored highest for this soil profile),
+  "recommendedDescription": string (short description of ${top.crop}'s growing needs),
+  "recommendedReasons": [string] (2-3 short bullet reasons tying the actual readings above to the score),
+  "alternativeDescriptions": [string] (one short description per alternative, same order as listed above),
+  "prePlantRecommendations": [string] (specific soil adjustments to make before planting ${top.crop}, based on the actual readings above)
+}
+Do not add any extra commentary or fields.`;
+
       const response = await this.openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
             content:
-              'You are a concise agronomist helping farmers choose the best crop based on soil data.',
+              "You are a concise agronomist explaining a RandomForest crop-fit model's output to a farmer. Never invent or change the scores given to you -- only explain them.",
           },
           { role: 'user', content: prompt },
         ],
         temperature: 0.2,
+        response_format: { type: 'json_object' },
       });
 
       const content = response.choices?.[0]?.message?.content;
       if (content) {
         const parsed = JSON.parse(content);
-        if (
-          parsed?.recommendedCrop &&
-          Array.isArray(parsed?.alternatives) &&
-          Array.isArray(parsed?.prePlantRecommendations)
-        ) {
-          return parsed;
+        if (parsed?.summary) {
+          return {
+            recommendedCrop: {
+              crop: top.crop,
+              score: top.reference_score,
+              description: parsed.recommendedDescription ?? '',
+              reasons: Array.isArray(parsed.recommendedReasons)
+                ? parsed.recommendedReasons
+                : [],
+            },
+            alternatives: alternatives.map((alt, i) => ({
+              crop: alt.crop,
+              score: alt.reference_score,
+              description: parsed.alternativeDescriptions?.[i] ?? '',
+            })),
+            summary: parsed.summary,
+            prePlantRecommendations: Array.isArray(
+              parsed.prePlantRecommendations,
+            )
+              ? parsed.prePlantRecommendations
+              : [],
+          };
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(
-        `AI crop suggestion failed, falling back to heuristic scoring: ${error?.message ?? error}`,
+        `OpenAI narration for crop suggestion failed, using plain RF summary: ${error?.message ?? error}`,
       );
     }
 
-    const rankedCrops = this.cropProfiles
-      .map((profile) => {
-        const score = this.calculateCropScore(reading, profile);
-        const reasons: string[] = [];
+    // Fallback: plain summary built directly from the RF ranking (no heuristics).
+    return {
+      recommendedCrop: {
+        crop: top.crop,
+        score: top.reference_score,
+        description: `RandomForest reference score: ${top.reference_score}/100.`,
+        reasons: [],
+      },
+      alternatives: alternatives.map((alt) => ({
+        crop: alt.crop,
+        score: alt.reference_score,
+        description: `RandomForest reference score: ${alt.reference_score}/100.`,
+      })),
+      summary: `Based on the trained crop-fit model, ${top.crop} is the strongest match for this field (score ${top.reference_score}/100).`,
+      prePlantRecommendations: [],
+    };
+  }
 
-        if (reading.moisture != null) {
-          reasons.push(
-            `Moisture ${reading.moisture.toFixed(0)}% aligns with ${profile.name.toLowerCase()} growing needs.`,
-          );
-        }
-        if (reading.ph != null) {
-          reasons.push(
-            `Soil pH ${reading.ph.toFixed(1)} is compatible with ${profile.name.toLowerCase()} cultivation.`,
-          );
-        }
+  async evaluateCrop(
+    deviceId: string,
+    cropName: string,
+    soilMetrics?: {
+      moisture?: number;
+      temperature?: number;
+      ph?: number;
+      conductivity?: number;
+    },
+  ) {
+    let reading: any;
+    if (soilMetrics) {
+      // Evaluating a saved/historical sample instead of the device's live reading.
+      reading = {
+        moisture: soilMetrics.moisture ?? null,
+        temperature: soilMetrics.temperature ?? null,
+        ph: soilMetrics.ph ?? null,
+        soilConductivity: soilMetrics.conductivity ?? null,
+      };
+    } else {
+      reading = await this.telemetryService.getLatestReading(deviceId);
+      if (!reading) {
+        return { error: 'No sensor readings found for this device.' };
+      }
+    }
 
-        return {
-          crop: profile.name,
-          score,
-          reasons,
-          description: profile.description,
-        };
-      })
-      .sort((a, b) => b.score - a.score);
+    const features = this.resolveMlFeatures(reading);
 
-    const [recommendedCrop, ...alternatives] = rankedCrops;
-    const selectedProfile = this.cropProfiles.find(
-      (profile) => profile.name === recommendedCrop.crop,
+    let modelResult: any;
+    try {
+      modelResult = await this.evaluateCropViaModel(features, cropName);
+    } catch (error: any) {
+      this.logger.error(
+        `Crop evaluation via ML model failed: ${error?.message ?? error}`,
+      );
+      return {
+        error: 'Unable to reach the crop recommendation model right now.',
+      };
+    }
+
+    const canPlantNow: boolean = Boolean(
+      modelResult?.decision?.startsWith('Recommended'),
     );
 
+    try {
+      const prompt = `A RandomForest agronomic reference model already decided whether ${cropName} can be planted now, based on the soil reading below. This decision is final -- explain it and suggest concrete actions, do not override it.
+
+Soil reading used:
+- Moisture (plant-available water): ${features.moisture_paw_percent.toFixed(1)}%
+- pH: ${features.soil_ph}
+- Temperature: ${features.temperature_c}°C
+- Conductivity: ${features.soil_conductivity_dsm} dS/m
+
+Model decision: ${modelResult.decision} (score ${modelResult.selected_crop_reference_score}/100)
+Model message: ${modelResult.decision_message}
+
+Respond ONLY with valid JSON using this exact structure:
+{
+  "reasons": [string] (2-3 short bullet reasons tying the actual readings above to the decision),
+  "actions": [string] (specific actions the farmer should take next, whether that's proceeding to plant or amending the soil first)
+}
+Do not add any extra commentary or fields.`;
+
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content:
+              "You are a concise agronomist explaining a RandomForest model's planting decision to a farmer. Never override the decision given to you -- only explain it and suggest actions.",
+          },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      });
+
+      const content = response.choices?.[0]?.message?.content;
+      if (content) {
+        const parsed = JSON.parse(content);
+        if (Array.isArray(parsed?.reasons) && Array.isArray(parsed?.actions)) {
+          return {
+            ...modelResult,
+            cropName,
+            canPlantNow,
+            recommendation: modelResult.decision_message,
+            reasons: parsed.reasons,
+            actions: parsed.actions,
+          };
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(
+        `OpenAI narration for crop evaluation failed, using plain RF result: ${error?.message ?? error}`,
+      );
+    }
+
+    // Fallback: plain result built directly from the RF decision (no heuristics).
     return {
-      recommendedCrop,
-      alternatives: alternatives.slice(0, 2),
-      summary: `Based on the latest readings, ${recommendedCrop.crop} is the strongest match for this field.`,
-      prePlantRecommendations: selectedProfile
-        ? this.buildPrePlantRecommendations(reading, selectedProfile)
-        : [],
+      ...modelResult,
+      cropName,
+      canPlantNow,
+      recommendation: modelResult.decision_message,
+      reasons: [
+        `Reference score: ${modelResult.selected_crop_reference_score}/100 (${modelResult.decision}).`,
+      ],
+      actions: canPlantNow
+        ? []
+        : [
+            `Consider ${modelResult.recommended_crop} instead (score ${modelResult.recommended_crop_reference_score}/100), or adjust soil conditions before planting ${cropName}.`,
+          ],
     };
   }
 
@@ -587,7 +462,7 @@ Do not add any extra commentary or fields.`;
 
     const systemPrompt = `
       You are an expert AI Agronomist monitoring a generic crop field.
-      
+
       CURRENT LIVE READINGS:
       - Moisture: ${reading.moisture}% (Target: > 40%)
       - Nitrogen: ${reading.nitrogen} ppm (Target: > 40 ppm)
@@ -595,7 +470,7 @@ Do not add any extra commentary or fields.`;
       - Potassium: ${reading.potassium} ppm (Target: > 30 ppm)
       - pH: ${reading.ph} (Target: ~6.0 - 6.5)
 
-      Analyze the current readings against general ideal conditions. 
+      Analyze the current readings against general ideal conditions.
       Respond ONLY with a valid JSON object matching this exact structure:
       {
         "healthScore": number (0-100),
@@ -693,12 +568,19 @@ Do not add any extra commentary or fields.`;
     return data;
   }
 
-  async predictRain(deviceId: string, lat: number, lon: number) {
+  // ── Rain prediction ──────────────────────────────────────────────────────
+  // lat/lon default to the fixed farm location (FARM_LATITUDE/FARM_LONGITUDE),
+  // NOT the caller's browser location -- the local sensor trend this fuses
+  // with is only meaningful for wherever the physical sensor node actually is.
+  async predictRain(deviceId: string, lat?: number, lon?: number) {
+    const latitude = lat ?? this.farmLatitude;
+    const longitude = lon ?? this.farmLongitude;
+
     // 1. Fetch Local Telemetry History
     const history = await this.telemetryService.getEnvironmentHistory(deviceId);
-    
+
     // We only need the latest few readings to see trends (e.g. last 3 readings)
-    const recentHistory = history.slice(0, 3).map(r => ({
+    const recentHistory = history.slice(0, 3).map((r) => ({
       time: r.recorded_at,
       pressure: r.atmospheric_pressure_hpa,
       pressure_condition: r.pressure_condition,
@@ -711,7 +593,7 @@ Do not add any extra commentary or fields.`;
     // 2. Fetch Regional Forecast from Open-Meteo
     let forecastData: any = null;
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=precipitation_probability,precipitation`;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&hourly=precipitation_probability,precipitation`;
       const response = await fetch(url);
       if (response.ok) {
         forecastData = await response.json();
@@ -721,21 +603,30 @@ Do not add any extra commentary or fields.`;
     }
 
     // Extract next 5 hours of precipitation data
-    let regionalPrecip = "Unknown";
+    let regionalPrecip = 'Unknown';
     if (forecastData && forecastData.hourly) {
-       const currentIndex = forecastData.hourly.time.findIndex((t: string) => new Date(t) >= new Date());
-       if (currentIndex !== -1) {
-          const next5HoursPop = forecastData.hourly.precipitation_probability.slice(currentIndex, currentIndex + 5);
-          const next5HoursRain = forecastData.hourly.precipitation.slice(currentIndex, currentIndex + 5);
-          regionalPrecip = `Next 5 hours Precipitation Probabilities: ${next5HoursPop.join('%, ')}% | Next 5 hours Rainfall: ${next5HoursRain.join('mm, ')}mm`;
-       }
+      const currentIndex = forecastData.hourly.time.findIndex(
+        (t: string) => new Date(t) >= new Date(),
+      );
+      if (currentIndex !== -1) {
+        const next5HoursPop =
+          forecastData.hourly.precipitation_probability.slice(
+            currentIndex,
+            currentIndex + 5,
+          );
+        const next5HoursRain = forecastData.hourly.precipitation.slice(
+          currentIndex,
+          currentIndex + 5,
+        );
+        regionalPrecip = `Next 5 hours Precipitation Probabilities: ${next5HoursPop.join('%, ')}% | Next 5 hours Rainfall: ${next5HoursRain.join('mm, ')}mm`;
+      }
     }
 
     // 3. Synthesize with OpenAI
     const systemPrompt = `
       You are an expert Meteorological AI Assistant for a Smart Agriculture Platform.
       You combine macro-level regional weather forecasts with hyper-local farm sensor telemetry to provide highly accurate short-term rain predictions.
-      
+
       REGIONAL FORECAST (Open-Meteo):
       ${regionalPrecip}
 
@@ -764,36 +655,43 @@ Do not add any extra commentary or fields.`;
         model: 'gpt-3.5-turbo',
         messages: [{ role: 'system', content: systemPrompt }],
         temperature: 0.2,
-        response_format: { type: 'json_object' }
+        response_format: { type: 'json_object' },
       });
 
       const result = JSON.parse(response.choices[0].message?.content || '{}');
-      
+
       // Update Supabase Database with the new prediction
       if (typeof result.will_rain === 'boolean') {
-        const { data: updateData, error: updateError } = await this.supabaseService.getClient()
-          .from('rain_predictions')
-          .update({
-            will_rain: result.will_rain,
-            updated_at: new Date().toISOString()
-          })
-          .eq('device_id', deviceId)
-          .select();
-          
+        const { data: updateData, error: updateError } =
+          await this.supabaseService
+            .getClient()
+            .from('rain_predictions')
+            .update({
+              will_rain: result.will_rain,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('device_id', deviceId)
+            .select();
+
         if (updateError) {
-          this.logger.error(`Failed to update rain_predictions table: ${updateError.message}`);
+          this.logger.error(
+            `Failed to update rain_predictions table: ${updateError.message}`,
+          );
         } else if (!updateData || updateData.length === 0) {
           // Row doesn't exist, insert it
-          const { error: insertError } = await this.supabaseService.getClient()
+          const { error: insertError } = await this.supabaseService
+            .getClient()
             .from('rain_predictions')
             .insert({
               device_id: deviceId,
               will_rain: result.will_rain,
-              updated_at: new Date().toISOString()
+              updated_at: new Date().toISOString(),
             });
-            
+
           if (insertError) {
-            this.logger.error(`Failed to insert into rain_predictions table: ${insertError.message}`);
+            this.logger.error(
+              `Failed to insert into rain_predictions table: ${insertError.message}`,
+            );
           }
         }
       }
@@ -802,59 +700,79 @@ Do not add any extra commentary or fields.`;
     } catch (error: any) {
       this.logger.error(`AI Rain Prediction failed: ${error.message}`);
       return {
-        prediction: "Unable to generate prediction at this time.",
+        prediction: 'Unable to generate prediction at this time.',
         confidence: 0,
-        reasoning: "AI synthesis failed or timed out."
+        reasoning: 'AI synthesis failed or timed out.',
       };
     }
   }
 
   async toggleRainPrediction(deviceId: string, enabled: boolean) {
     this.logger.log(`Toggling rain prediction for ${deviceId} to ${enabled}`);
+
+    const update: {
+      prediction_enabled: boolean;
+      updated_at: string;
+      will_rain?: boolean;
+    } = {
+      prediction_enabled: enabled,
+      updated_at: new Date().toISOString(),
+    };
     if (!enabled) {
-      // If turned off, immediately set will_rain to false
-      const { data, error: updateError } = await this.supabaseService.getClient()
+      // If turned off, immediately set will_rain to false too.
+      update.will_rain = false;
+    }
+
+    const { data, error: updateError } = await this.supabaseService
+      .getClient()
+      .from('rain_predictions')
+      .update(update)
+      .eq('device_id', deviceId)
+      .select();
+
+    if (updateError) {
+      this.logger.error(
+        `Failed to update rain_predictions.prediction_enabled: ${updateError.message}`,
+      );
+    } else if (!data || data.length === 0) {
+      // Row doesn't exist, insert it
+      const { error: insertError } = await this.supabaseService
+        .getClient()
         .from('rain_predictions')
-        .update({
+        .insert({
+          device_id: deviceId,
           will_rain: false,
-          updated_at: new Date().toISOString()
-        })
-        .eq('device_id', deviceId)
-        .select();
-        
-      if (updateError) {
-        this.logger.error(`Failed to force disable rain_prediction (update): ${updateError.message}`);
-      } else if (!data || data.length === 0) {
-        // Row doesn't exist, insert it
-        const { error: insertError } = await this.supabaseService.getClient()
-          .from('rain_predictions')
-          .insert({
-            device_id: deviceId,
-            will_rain: false,
-            updated_at: new Date().toISOString()
-          });
-          
-        if (insertError) {
-          this.logger.error(`Failed to force disable rain_prediction (insert): ${insertError.message}`);
-        }
+          prediction_enabled: enabled,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (insertError) {
+        this.logger.error(
+          `Failed to insert rain_predictions row: ${insertError.message}`,
+        );
       }
     }
+
     return { success: true, enabled };
   }
 
   async getRainPredictionStatus(deviceId: string) {
-    const { data, error } = await this.supabaseService.getClient()
+    const { data, error } = await this.supabaseService
+      .getClient()
       .from('rain_predictions')
-      .select('will_rain')
+      .select('will_rain, prediction_enabled')
       .eq('device_id', deviceId)
       .single();
-      
+
     if (error && error.code !== 'PGRST116') {
-      this.logger.error(`Error fetching prediction status for ${deviceId}: ${error.message}`);
+      this.logger.error(
+        `Error fetching prediction status for ${deviceId}: ${error.message}`,
+      );
     }
-    
-    return { will_rain: data?.will_rain ?? false };
+
+    return {
+      will_rain: data?.will_rain ?? false,
+      prediction_enabled: data?.prediction_enabled ?? true,
+    };
   }
 }
-
-
