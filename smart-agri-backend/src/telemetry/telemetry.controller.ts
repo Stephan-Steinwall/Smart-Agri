@@ -11,7 +11,10 @@ import {
   VerifyOtpDto,
   VerifySystemControlDto,
 } from './dto/auth.dto';
-import { ToggleSwitchDto } from './dto/switches.dto';
+import {
+  ToggleSwitchDto,
+  UpdateThresholdsDto
+} from './dto/switches.dto';
 import {
   DeleteAnalysisDto,
   SaveAnalysisDto,
@@ -101,6 +104,15 @@ export class TelemetryController {
     );
   }
 
+  @UseGuards(AuthGuard)
+  @Post('system-switches/:deviceId/thresholds')
+  async updateThresholds(
+    @Param('deviceId') deviceId: string,
+    @Body() body: UpdateThresholdsDto,
+  ) {
+    return this.telemetryService.updateThresholds(deviceId, body);
+  }
+
   // ── Pre-session auth routes (no guard: these ARE how a session is obtained) ──
 
   @Post('auth/login')
@@ -160,5 +172,51 @@ export class TelemetryController {
       body.oldSystemPassword,
       body.newSystemPassword,
     );
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('custom-presets')
+  async getCustomPresets() {
+    return this.telemetryService.getCustomPresets();
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('custom-presets')
+  async createCustomPreset(@Body() body: any) {
+    return this.telemetryService.createCustomPreset(body);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('custom-presets/:id/delete')
+  async deleteCustomPreset(@Param('id') id: string) {
+    // Note: Since some clients/fetch configurations don't like DELETE bodies or have issues, we use POST with /delete to be safe for this small app. But standard DELETE is better. Let's stick to standard DELETE.
+    return this.telemetryService.deleteCustomPreset(id);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('system-switches/:deviceId/automation/toggle')
+  async toggleAiAutomation(
+    @Param('deviceId') deviceId: string,
+    @Body('enabled') enabled: boolean,
+  ) {
+    return this.telemetryService.toggleAiAutomation(deviceId, enabled);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('system-switches/:deviceId/auto-grow-light/toggle')
+  async toggleAutoGrowLight(
+    @Param('deviceId') deviceId: string,
+    @Body('enabled') enabled: boolean,
+  ) {
+    return this.telemetryService.toggleAutoGrowLight(deviceId, enabled);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('system-switches/:deviceId/auto-mister/toggle')
+  async toggleAutoMister(
+    @Param('deviceId') deviceId: string,
+    @Body('enabled') enabled: boolean,
+  ) {
+    return this.telemetryService.toggleAutoMister(deviceId, enabled);
   }
 }

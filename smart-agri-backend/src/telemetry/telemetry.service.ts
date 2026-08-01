@@ -468,8 +468,19 @@ export class TelemetryService {
       return {
         ...data,
         system_switch: data.system_switch ?? true,
+        ai_automation_enabled: data.ai_automation_enabled ?? true,
+        auto_grow_light_enabled: data.auto_grow_light_enabled ?? false,
         light_01: data.light_01 ?? false,
         light_02: data.light_02 ?? false,
+        moisture_threshold_low: data.moisture_threshold_low ?? 20,
+        moisture_threshold_high: data.moisture_threshold_high ?? 50,
+        nitrogen_threshold_low: data.nitrogen_threshold_low ?? 30,
+        nitrogen_threshold_high: data.nitrogen_threshold_high ?? 70,
+        phosphorus_threshold_low: data.phosphorus_threshold_low ?? 30,
+        phosphorus_threshold_high: data.phosphorus_threshold_high ?? 70,
+        potassium_threshold_low: data.potassium_threshold_low ?? 30,
+        potassium_threshold_high: data.potassium_threshold_high ?? 70,
+        light_intensity_threshold_lux: data.light_intensity_threshold_lux ?? 5000,
       };
     }
 
@@ -482,6 +493,15 @@ export class TelemetryService {
       system_switch: true,
       light_01: false,
       light_02: false,
+      moisture_threshold_low: 20,
+      moisture_threshold_high: 50,
+      nitrogen_threshold_low: 30,
+      nitrogen_threshold_high: 70,
+      phosphorus_threshold_low: 30,
+      phosphorus_threshold_high: 70,
+      potassium_threshold_low: 30,
+      potassium_threshold_high: 70,
+      light_intensity_threshold_lux: 5000,
     };
   }
 
@@ -494,6 +514,7 @@ export class TelemetryService {
       'system_switch',
       'light_01',
       'light_02',
+      'pump_mister',
     ];
     if (!validColumns.includes(pumpName)) {
       throw new Error('Invalid pump name');
@@ -589,6 +610,33 @@ export class TelemetryService {
     }
 
     return { success: true, pumpName, state };
+  }
+
+  async updateThresholds(deviceId: string, body: any) {
+    const { data: updateData, error: updateError } = await this.supabaseService
+      .getClient()
+      .from('system_switches')
+      .update({
+        moisture_threshold_low: body.moisture_threshold_low,
+        moisture_threshold_high: body.moisture_threshold_high,
+        nitrogen_threshold_low: body.nitrogen_threshold_low,
+        nitrogen_threshold_high: body.nitrogen_threshold_high,
+        phosphorus_threshold_low: body.phosphorus_threshold_low,
+        phosphorus_threshold_high: body.phosphorus_threshold_high,
+        potassium_threshold_low: body.potassium_threshold_low,
+        potassium_threshold_high: body.potassium_threshold_high,
+        light_intensity_threshold_lux: body.light_intensity_threshold_lux,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('device_id', deviceId)
+      .select();
+
+    if (updateError) {
+      this.logger.error(`Error updating thresholds: ${updateError.message}`);
+      return { success: false, message: updateError.message };
+    }
+
+    return { success: true, thresholds: updateData?.[0] };
   }
 
   async login(usernameOrEmail: string, password?: string) {
@@ -714,18 +762,42 @@ export class TelemetryService {
         matchedUser.phone_number ||
         matchedUser.mobile ||
         '+1 (555) 382-9102';
-      this.sendSms(userPhone, code, matchedUser.email);
+
+      const is2FADisabled = userPhone.endsWith(':NO_2FA');
+      const cleanPhone = userPhone.replace(':NO_2FA', '');
+
+      const sanitizedUser = {
+        email: matchedUser.email,
+        username: matchedUser.username,
+        phone: cleanPhone,
+        full_name: matchedUser.full_name || matchedUser.name,
+        two_factor_enabled: !is2FADisabled,
+      };
+
+      if (is2FADisabled) {
+        // Bypass OTP entirely
+        this.otpSessions.delete(sessionKey);
+        const token = await this.jwtService.signAsync({
+          sub: matchedUser.id ?? matchedUser.email ?? matchedUser.username,
+          email: matchedUser.email,
+          username: matchedUser.username,
+        });
+        return {
+          success: true,
+          requires2FA: false,
+          user: sanitizedUser,
+          token,
+          sessionExpiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        };
+      }
+
+      this.sendSms(cleanPhone, code, matchedUser.email);
 
       // 3. Return sanitized profile (NEVER return password hash or OTP code to the client)
       return {
         success: true,
         requires2FA: true,
-        user: {
-          email: matchedUser.email,
-          username: matchedUser.username,
-          phone: userPhone,
-          full_name: matchedUser.full_name || matchedUser.name,
-        },
+        user: sanitizedUser,
       };
     } catch (err: any) {
       this.logger.error(`Login error: ${err.message}`);
@@ -954,6 +1026,7 @@ export class TelemetryService {
     fullName?: string;
     username?: string;
     phone?: string;
+    twoFactorEnabled?: boolean;
   }) {
     this.logger.log(
       `[AUTH SERVICE] Updating user account for ${body.oldEmail || body.email || body.username}`,
@@ -1011,16 +1084,20 @@ export class TelemetryService {
         if ('user_email' in target) updatePayload.user_email = body.email;
       }
       if (body.phone) {
-        if ('phone' in target) updatePayload.phone = body.phone;
-        if ('phone_number' in target) updatePayload.phone_number = body.phone;
-        if ('mobile' in target) updatePayload.mobile = body.phone;
-        if ('contact_no' in target) updatePayload.contact_no = body.phone;
+        let finalPhone = body.phone;
+        if (body.twoFactorEnabled === false) {
+          finalPhone += ':NO_2FA';
+        }
+        if ('phone' in target) updatePayload.phone = finalPhone;
+        if ('phone_number' in target) updatePayload.phone_number = finalPhone;
+        if ('mobile' in target) updatePayload.mobile = finalPhone;
+        if ('contact_no' in target) updatePayload.contact_no = finalPhone;
         if (
           !('phone' in target) &&
           !('phone_number' in target) &&
           !('mobile' in target)
         ) {
-          updatePayload.phone = body.phone;
+          updatePayload.phone = finalPhone;
         }
       }
       if ('updated_at' in target)
@@ -1040,10 +1117,17 @@ export class TelemetryService {
         return { success: false, message: updateErr.message };
       }
 
-      const updatedUser =
+      let updatedUser =
         updated && updated.length > 0
           ? updated[0]
           : { ...target, ...updatePayload };
+
+      const is2FADisabledUpdate = updatedUser.phone && updatedUser.phone.endsWith(':NO_2FA');
+      if (is2FADisabledUpdate) {
+        updatedUser = { ...updatedUser, phone: updatedUser.phone.replace(':NO_2FA', '') };
+      }
+      updatedUser.two_factor_enabled = !is2FADisabledUpdate;
+
       return {
         success: true,
         user: updatedUser,
@@ -1286,5 +1370,125 @@ export class TelemetryService {
     } catch (err: any) {
       return { success: false, message: err.message };
     }
+  }
+
+  async getCustomPresets() {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('custom_threshold_presets')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      this.logger.error(`Error fetching custom presets: ${error.message}`);
+      throw new Error('Failed to fetch custom presets');
+    }
+    return data || [];
+  }
+
+  async createCustomPreset(payload: {
+    preset_name: string;
+    moisture_threshold_low: number;
+    moisture_threshold_high: number;
+    nitrogen_threshold_low: number;
+    nitrogen_threshold_high: number;
+    phosphorus_threshold_low: number;
+    phosphorus_threshold_high: number;
+    potassium_threshold_low: number;
+    potassium_threshold_high: number;
+  }) {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('custom_threshold_presets')
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505') { // unique violation
+        throw new Error('A preset with this name already exists.');
+      }
+      this.logger.error(`Error saving custom preset: ${error.message}`);
+      throw new Error('Failed to save custom preset');
+    }
+
+    return data;
+  }
+
+  async deleteCustomPreset(id: string) {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('custom_threshold_presets')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      this.logger.error(`Error deleting custom preset: ${error.message}`);
+      throw new Error('Failed to delete custom preset');
+    }
+
+    return { success: true };
+  }
+
+  async toggleAiAutomation(deviceId: string, enabled: boolean) {
+    this.logger.log(`Toggling AI Automation for ${deviceId} to ${enabled}`);
+
+    // If we are disabling automation, we must also shut off all pumps to be safe
+    const updatePayload: any = { ai_automation_enabled: enabled };
+    
+    if (!enabled) {
+      updatePayload.pump_water = false;
+      updatePayload.pump_nitrogen = false;
+      updatePayload.pump_phosphorus = false;
+      updatePayload.pump_potassium = false;
+      this.logger.log(`AI Automation OFF: Forcing all pumps off for safety.`);
+    }
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('system_switches')
+      .update(updatePayload)
+      .eq('device_id', deviceId);
+
+    if (error) {
+      this.logger.error(`Error toggling AI automation: ${error.message}`);
+      throw new Error('Failed to toggle AI automation');
+    }
+
+    return { success: true, ai_automation_enabled: enabled };
+  }
+
+  async toggleAutoGrowLight(deviceId: string, enabled: boolean) {
+    this.logger.log(`Toggling auto grow light for ${deviceId} to ${enabled}`);
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('system_switches')
+      .update({ auto_grow_light_enabled: enabled })
+      .eq('device_id', deviceId);
+
+    if (error) {
+      this.logger.error(`Error toggling auto grow light: ${error.message}`);
+      throw new Error('Failed to toggle auto grow light');
+    }
+
+    return { success: true, auto_grow_light_enabled: enabled };
+  }
+
+  async toggleAutoMister(deviceId: string, enabled: boolean) {
+    this.logger.log(`Toggling auto humidity mister for ${deviceId} to ${enabled}`);
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('system_switches')
+      .update({ auto_mister_enabled: enabled })
+      .eq('device_id', deviceId);
+
+    if (error) {
+      this.logger.error(`Error toggling auto humidity mister: ${error.message}`);
+      throw new Error('Failed to toggle auto humidity mister');
+    }
+
+    return { success: true, auto_mister_enabled: enabled };
   }
 }

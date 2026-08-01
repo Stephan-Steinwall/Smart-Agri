@@ -568,6 +568,22 @@ Do not add any extra commentary or fields.`;
     return data;
   }
 
+  async deleteChatHistory(sessionId: string) {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('ai_chat_history')
+      .delete()
+      .eq('session_id', sessionId);
+
+    if (error) {
+      this.logger.error(
+        `Error deleting history for session ${sessionId}: ${error.message}`,
+      );
+      throw new Error(`Failed to delete chat history: ${error.message}`);
+    }
+    return { success: true };
+  }
+
   // ── Rain prediction ──────────────────────────────────────────────────────
   // lat/lon default to the fixed farm location (FARM_LATITUDE/FARM_LONGITUDE),
   // NOT the caller's browser location -- the local sensor trend this fuses
@@ -774,5 +790,53 @@ Do not add any extra commentary or fields.`;
       will_rain: data?.will_rain ?? false,
       prediction_enabled: data?.prediction_enabled ?? true,
     };
+  }
+
+  async getCropThresholds(cropName: string) {
+    this.logger.log(`Generating AI thresholds for crop: ${cropName}`);
+    
+    const systemPrompt = `
+      You are an expert Agronomy AI.
+      Determine the optimal automation boundaries for a smart irrigation and fertigation system for growing the crop: ${cropName}.
+      Provide the safe and optimal Low (turn ON) and High (turn OFF) thresholds for:
+      - Soil Moisture (%)
+      - Nitrogen (mg/kg)
+      - Phosphorus (mg/kg)
+      - Potassium (mg/kg)
+
+      You MUST respond with ONLY a raw JSON object and nothing else. No markdown wrapping.
+      The JSON structure MUST exactly match the following:
+      {
+        "moisture_threshold_low": number,
+        "moisture_threshold_high": number,
+        "nitrogen_threshold_low": number,
+        "nitrogen_threshold_high": number,
+        "phosphorus_threshold_low": number,
+        "phosphorus_threshold_high": number,
+        "potassium_threshold_low": number,
+        "potassium_threshold_high": number
+      }
+    `;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'system', content: systemPrompt }],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      });
+
+      const jsonStr = response.choices[0].message.content || '{}';
+      return JSON.parse(jsonStr);
+    } catch (error: any) {
+      this.logger.error(`Failed to generate crop thresholds for ${cropName}: ${error.message}`);
+      // Fallback values if AI fails
+      return {
+        moisture_threshold_low: 40, moisture_threshold_high: 60,
+        nitrogen_threshold_low: 30, nitrogen_threshold_high: 50,
+        phosphorus_threshold_low: 30, phosphorus_threshold_high: 50,
+        potassium_threshold_low: 30, potassium_threshold_high: 50
+      };
+    }
   }
 }

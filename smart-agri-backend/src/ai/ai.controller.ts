@@ -3,6 +3,7 @@ import {
   Post,
   Body,
   Get,
+  Delete,
   Param,
   Query,
   UseGuards,
@@ -56,6 +57,11 @@ export class AiController {
     return this.aiService.getChatHistory(sessionId);
   }
 
+  @Delete('history/:sessionId')
+  async deleteHistory(@Param('sessionId') sessionId: string) {
+    return this.aiService.deleteChatHistory(sessionId);
+  }
+
   @Get('rain-prediction/:deviceId')
   async getRainPrediction(
     @Param('deviceId') deviceId: string,
@@ -80,5 +86,10 @@ export class AiController {
   @Get('rain-prediction-status/:deviceId')
   async getRainPredictionStatus(@Param('deviceId') deviceId: string) {
     return this.aiService.getRainPredictionStatus(deviceId);
+  }
+
+  @Get('crop-thresholds/:cropName')
+  async getCropThresholds(@Param('cropName') cropName: string) {
+    return this.aiService.getCropThresholds(cropName);
   }
 }

@@ -101,7 +101,7 @@ export default function AiAssistant() {
           setMessages([
             {
               role: 'ai',
-              content: "Hello! I'm your SmartAgri AI Agronomist. Ask me about soil health, NPK levels, or crop recommendations.",
+              content: "Hello! I'm AgriBot. Ask me about soil health, NPK levels, or crop recommendations.",
               ts: new Date(),
             }
           ]);
@@ -111,7 +111,7 @@ export default function AiAssistant() {
         setMessages([
           {
             role: 'ai',
-            content: "Hello! I'm your SmartAgri AI Agronomist (Offline Mode). Ask me about soil health, NPK levels, or crop recommendations.",
+            content: "Hello! I'm AgriBot (Offline Mode). Ask me about soil health, NPK levels, or crop recommendations.",
             ts: new Date(),
           }
         ]);
@@ -221,7 +221,7 @@ export default function AiAssistant() {
               <BrainCircuit className="w-5 h-5 text-white" />
             </div>
             <div>
-              <p className="font-bold text-white text-sm">AI Agronomist</p>
+              <p className="font-bold text-white text-sm">AgriBot</p>
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse" />
                 <span className="text-[11px] text-green-200">Monitoring: {DEVICE_NAME}</span>

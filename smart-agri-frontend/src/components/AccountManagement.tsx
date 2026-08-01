@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  User, Mail, Phone, Shield, LogOut, Check, X, Key, Sparkles, Save, RefreshCw, Lock, Globe, CheckCircle2
+  User, Mail, Phone, Shield, LogOut, Check, X, Key, Sparkles, Save, RefreshCw, Lock, Globe, CheckCircle2,
+  ShieldAlert, KeyRound, AlertTriangle, Eye, EyeOff
 } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 
@@ -43,13 +44,69 @@ export default function AccountManagement() {
   const [isOpen, setIsOpen] = useState(false);
 
   // Form State
-  const [fullName, setFullName] = useState('Stephan Steinwall');
   const [username, setUsername] = useState('admin');
   const [email, setEmail] = useState('admin@smartagri.io');
   const [originalEmail, setOriginalEmail] = useState('admin@smartagri.io');
   const [countryCode, setCountryCode] = useState('+94');
   const [phoneNumber, setPhoneNumber] = useState('77 494 5542');
   const [twoFactor, setTwoFactor] = useState(true);
+
+  // Security Lock State
+  const [isSecurityUnlocked, setIsSecurityUnlocked] = useState(false);
+  const [securityPassword, setSecurityPassword] = useState('');
+  const [showLockPassword, setShowLockPassword] = useState(false);
+  const [securityError, setSecurityError] = useState('');
+  const [verifyingSecurity, setVerifyingSecurity] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && isOpen) {
+      const unlocked = sessionStorage.getItem('systemControlUnlocked');
+      if (unlocked === 'true') {
+        setIsSecurityUnlocked(true);
+      } else {
+        setIsSecurityUnlocked(false);
+        setSecurityPassword('');
+        setSecurityError('');
+      }
+    }
+  }, [isOpen]);
+
+  const handleUnlockSecurity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVerifyingSecurity(true);
+    setSecurityError('');
+
+    try {
+      let userEmail = email || 'admin@smartagri.io';
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('userAccount');
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            userEmail = parsed.email || parsed.username || userEmail;
+          } catch (err) {}
+        }
+      }
+
+      const res = await apiClient.post('/telemetry/auth/verify-system-control', {
+        emailOrUsername: userEmail,
+        password: securityPassword
+      });
+
+      if (res.data && res.data.success) {
+        setIsSecurityUnlocked(true);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('systemControlUnlocked', 'true');
+        }
+      } else {
+        setSecurityError(res.data?.message || 'Invalid System Control security password.');
+      }
+    } catch (err: any) {
+      setSecurityError(err?.response?.data?.message || 'Failed to verify password. Please try again.');
+    } finally {
+      setVerifyingSecurity(false);
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -62,7 +119,7 @@ export default function AccountManagement() {
             setOriginalEmail(parsed.email);
           }
           if (parsed.username) setUsername(parsed.username);
-          if (parsed.full_name || parsed.name) setFullName(parsed.full_name || parsed.name);
+          if (typeof parsed.two_factor_enabled === 'boolean') setTwoFactor(parsed.two_factor_enabled);
           
           const p = String(parsed.phone || parsed.phone_number || parsed.mobile || '+94774945542').trim();
           const match = COUNTRY_CODES.find(c => p.startsWith(c.code));
@@ -200,14 +257,21 @@ export default function AccountManagement() {
       const res = await apiClient.post('/telemetry/auth/update-account', {
         oldEmail: originalEmail,
         email: email.trim(),
-        fullName: fullName.trim(),
         username: username.trim(),
         phone: fullPhone,
+        twoFactorEnabled: twoFactor,
       });
 
       if (res.data && res.data.success) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('userAccount', JSON.stringify(res.data.user));
+          const existing = localStorage.getItem('userAccount');
+          let parsed: any = {};
+          try { if (existing) parsed = JSON.parse(existing); } catch (e) {}
+          const updatedUser = {
+            ...parsed,
+            ...res.data.user,
+          };
+          localStorage.setItem('userAccount', JSON.stringify(updatedUser));
         }
         setOriginalEmail(email.trim());
         setSaveMessage('✓ Account & phone number updated successfully in user_accounts!');
@@ -242,8 +306,6 @@ export default function AccountManagement() {
       try { if (existing) parsed = JSON.parse(existing); } catch(e){}
       const updated = {
         ...parsed,
-        full_name: fullName.trim(),
-        name: fullName.trim(),
         username: username.trim(),
         email: email.trim(),
         phone: fullPhone,
@@ -278,7 +340,7 @@ export default function AccountManagement() {
         }}
         title="Account Management"
       >
-        F
+        {(username || 'F').charAt(0).toUpperCase()}
       </button>
 
       {/* Modal Overlay */}
@@ -291,6 +353,70 @@ export default function AccountManagement() {
           {/* Glassmorphic Modal Dialog */}
           <div className="relative z-10 w-full max-w-lg bg-card border border-border rounded-[2rem] p-6 sm:p-8 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-foreground max-h-[90vh] overflow-y-auto">
             
+            {!isSecurityUnlocked ? (
+              <div className="flex flex-col items-center text-center relative z-10 py-4">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+                  <ShieldAlert className="w-8 h-8 text-emerald-500 animate-pulse" />
+                </div>
+                <h2 className="text-2xl font-extrabold tracking-tight">Security Access Required</h2>
+                <p className="text-sm text-muted-foreground mt-2 mb-6">
+                  Account management requires your System Control password to proceed.
+                </p>
+
+                <form onSubmit={handleUnlockSecurity} className="space-y-4 w-full relative z-10 text-left">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                      System Control Password
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <Lock className="h-5 w-5 text-emerald-500" />
+                      </div>
+                      <input
+                        type={showLockPassword ? "text" : "password"}
+                        value={securityPassword}
+                        onChange={(e) => setSecurityPassword(e.target.value)}
+                        className="w-full pl-11 pr-11 py-3.5 bg-background border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                        placeholder="Enter security code..."
+                        autoFocus
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLockPassword(!showLockPassword)}
+                        className="absolute inset-y-0 right-0 pr-4 flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {showLockPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {securityError && (
+                    <div className="text-red-500 text-sm text-center font-medium bg-red-500/10 py-2.5 px-3 rounded-xl border border-red-500/20 flex items-center justify-center gap-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      <span>{securityError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={verifyingSecurity || !securityPassword}
+                    className="w-full mt-2 flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-primary-foreground font-extrabold py-3.5 px-4 rounded-xl transition-all duration-300 shadow-[0_0_30px_rgba(16,185,129,0.3)] hover:shadow-[0_0_50px_rgba(16,185,129,0.5)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <KeyRound className="w-5 h-5" />
+                    <span>{verifyingSecurity ? 'Verifying Authorization...' : 'Unlock Settings'}</span>
+                  </button>
+                </form>
+
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className="mt-6 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <>
             {/* Header */}
             <div className="flex items-center justify-between pb-5 border-b border-border mb-6">
               <div className="flex items-center gap-3">
@@ -319,14 +445,11 @@ export default function AccountManagement() {
                   background: 'linear-gradient(135deg, hsl(142, 65%, 28%), hsl(162, 55%, 40%))',
                 }}
               >
-                F
+                {(username || 'F').charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h3 className="font-extrabold text-base text-foreground truncate">{fullName}</h3>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
-                    <Sparkles className="w-2.5 h-2.5" /> Pro Plan
-                  </span>
+                  <h3 className="font-extrabold text-base text-foreground truncate">{username}</h3>
                 </div>
                 <p className="text-xs text-muted-foreground font-medium mt-0.5">Master Agronomist & Admin</p>
               </div>
@@ -335,21 +458,8 @@ export default function AccountManagement() {
             {/* Account Settings Form */}
             <form onSubmit={handleSave} className="space-y-4">
               
-              {/* Full Name & Username in 2 Columns */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5 text-primary" /> Full Name
-                  </label>
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-muted/50 border border-border text-sm font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all"
-                    required
-                  />
-                </div>
-
+              {/* Username */}
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
                     <Lock className="w-3.5 h-3.5 text-primary" /> Login Username
@@ -383,9 +493,6 @@ export default function AccountManagement() {
                 <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <Phone className="w-3.5 h-3.5 text-primary" /> SMS Alert Number
-                  </span>
-                  <span className="text-[10px] text-emerald-500 font-medium flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" /> Updates user_accounts table
                   </span>
                 </label>
                 <div className="flex gap-2">
@@ -693,6 +800,8 @@ export default function AccountManagement() {
               </div>
 
             </form>
+              </>
+            )}
 
           </div>
         </div>

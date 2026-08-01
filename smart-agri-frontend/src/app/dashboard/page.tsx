@@ -8,7 +8,7 @@ import { apiClient } from '@/lib/api';
 import {
   Activity, Droplets, Thermometer, Sprout,
   BrainCircuit, BarChart2, CloudSun, Beaker, Zap, Leaf, FlaskConical, Target,
-  Wind, CloudRain, Gauge, Cloud, ShieldAlert, Umbrella, Power, ChevronRight, Bot, X, Send
+  Wind, CloudRain, Gauge, Cloud, ShieldAlert, Umbrella, Power, ChevronRight, Bot, X, Send, Trash2
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -107,7 +107,7 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const [isSystemOn, setIsSystemOn] = useState(true);
 
-  const WELCOME_MESSAGE: Message = { role: 'ai', content: "Hello! I'm your AI Agronomist. Ask me anything about your current dashboard data." };
+  const WELCOME_MESSAGE: Message = { role: 'ai', content: "Hello! I'm AgriBot. Ask me anything about your current dashboard data." };
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -146,6 +146,15 @@ export default function Dashboard() {
     })();
   }, [isChatOpen, isChatHistoryLoaded]);
 
+  const handleClearChat = async () => {
+    setMessages([WELCOME_MESSAGE]);
+    try {
+      await apiClient.delete(`/ai/history/${QUICK_CHAT_SESSION_ID}`);
+    } catch (e) {
+      console.error('Failed to clear chat history on server', e);
+    }
+  };
+
   const sendQuickMessage = async () => {
     if (!chatInput.trim() || isChatLoading) return;
     const userMsg: Message = { role: 'user', content: chatInput, ts: new Date() };
@@ -173,8 +182,6 @@ export default function Dashboard() {
     }
   };
 
-  // Removed duplicate state declaration
-
   const { data: pumpData } = useQuery({
     queryKey: ['systemSwitches', DEVICE_ID],
     queryFn: async () => {
@@ -196,30 +203,7 @@ export default function Dashboard() {
     }
   }, [pumpData]);
 
-  const handleSystemToggle = async () => {
-    const newState = !isSystemOn;
-    setIsSystemOn(newState); // Immediate optimistic UI update (zero delay)
-    queryClient.setQueryData(['systemSwitches', DEVICE_ID], (old: any) =>
-      old ? { ...old, system_switch: newState } : { system_switch: newState }
-    );
 
-    try {
-      // Pump/light control goes through the guarded API only now -- it used
-      // to also write straight to Supabase with the public anon key as an
-      // "optimistic" pre-write, which meant anyone with that key (it ships in
-      // every page load) could flip switches without logging in at all.
-      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
-        pumpName: 'system_switch',
-        state: newState
-      });
-    } catch (e) {
-      console.error('Failed to toggle system switch', e);
-      setIsSystemOn(!newState); // revert on complete failure
-      queryClient.setQueryData(['systemSwitches', DEVICE_ID], (old: any) =>
-        old ? { ...old, system_switch: !newState } : { system_switch: !newState }
-      );
-    }
-  };
 
   // Telemetry chart for the specific device
   const { data: chartData, isLoading: chartLoading } = useQuery({
@@ -308,17 +292,16 @@ export default function Dashboard() {
             <div className="flex flex-col items-end gap-1.5 border-t md:border-t-0 md:border-l border-white/20 pt-3 md:pt-0 md:pl-6">
               
               <div className="flex items-center gap-2 mb-2">
-                <button 
-                  onClick={handleSystemToggle}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-colors border shadow-sm ${
+                <div 
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border shadow-sm ${
                     isSystemOn 
-                    ? 'bg-green-500/20 text-green-100 border-green-400/30 hover:bg-green-500/30' 
-                    : 'bg-red-500/20 text-red-100 border-red-500/30 hover:bg-red-500/30'
+                    ? 'bg-green-500/20 text-green-100 border-green-400/30' 
+                    : 'bg-red-500/20 text-red-100 border-red-500/30'
                   }`}
                 >
                   <Power className="w-3.5 h-3.5" />
                   {isSystemOn ? 'System ON' : 'System OFF'}
-                </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-2 text-sm opacity-90 font-medium">
@@ -600,13 +583,18 @@ export default function Dashboard() {
                 <Bot className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h3 className="text-sm font-bold leading-none">AI Agronomist</h3>
+                <h3 className="text-sm font-bold leading-none">AgriBot</h3>
                 <p className="text-[10px] text-white/80 font-medium mt-1 uppercase tracking-wider">Quick Chat</p>
               </div>
             </div>
-            <button onClick={() => setIsChatOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors">
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={handleClearChat} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors" title="Clear Chat">
+                <Trash2 className="w-4 h-4" />
+              </button>
+              <button onClick={() => setIsChatOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Messages */}

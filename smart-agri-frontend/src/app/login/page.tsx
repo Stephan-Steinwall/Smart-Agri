@@ -57,6 +57,18 @@ export default function LoginPage() {
       });
 
       if (res.data && res.data.success && res.data.user) {
+        if (res.data.requires2FA === false) {
+          if (typeof window !== 'undefined') {
+            const sessionData = {
+              ...res.data.user,
+              token: res.data.token,
+              sessionExpiresAt: res.data.sessionExpiresAt || (Date.now() + 24 * 60 * 60 * 1000)
+            };
+            localStorage.setItem('userAccount', JSON.stringify(sessionData));
+          }
+          router.push('/dashboard');
+          return;
+        }
         startTwoStepVerification(res.data.user);
         return;
       } else if (res.data && !res.data.success && res.data.message) {
