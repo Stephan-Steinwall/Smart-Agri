@@ -82,7 +82,7 @@ export default function WeatherWidget() {
         { timeout: 8000, enableHighAccuracy: true }
       );
     } else {
-      setLocationName("Colombo, LK");
+      setTimeout(() => setLocationName("Colombo, LK"), 0);
     }
   }, []);
 

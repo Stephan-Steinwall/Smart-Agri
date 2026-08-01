@@ -11,10 +11,7 @@ import {
   VerifyOtpDto,
   VerifySystemControlDto,
 } from './dto/auth.dto';
-import {
-  ToggleSwitchDto,
-  UpdateThresholdsDto
-} from './dto/switches.dto';
+import { ToggleSwitchDto, UpdateThresholdsDto } from './dto/switches.dto';
 import {
   DeleteAnalysisDto,
   SaveAnalysisDto,

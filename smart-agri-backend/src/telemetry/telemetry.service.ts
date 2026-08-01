@@ -480,7 +480,8 @@ export class TelemetryService {
         phosphorus_threshold_high: data.phosphorus_threshold_high ?? 70,
         potassium_threshold_low: data.potassium_threshold_low ?? 30,
         potassium_threshold_high: data.potassium_threshold_high ?? 70,
-        light_intensity_threshold_lux: data.light_intensity_threshold_lux ?? 5000,
+        light_intensity_threshold_lux:
+          data.light_intensity_threshold_lux ?? 5000,
       };
     }
 
@@ -1122,9 +1123,13 @@ export class TelemetryService {
           ? updated[0]
           : { ...target, ...updatePayload };
 
-      const is2FADisabledUpdate = updatedUser.phone && updatedUser.phone.endsWith(':NO_2FA');
+      const is2FADisabledUpdate =
+        updatedUser.phone && updatedUser.phone.endsWith(':NO_2FA');
       if (is2FADisabledUpdate) {
-        updatedUser = { ...updatedUser, phone: updatedUser.phone.replace(':NO_2FA', '') };
+        updatedUser = {
+          ...updatedUser,
+          phone: updatedUser.phone.replace(':NO_2FA', ''),
+        };
       }
       updatedUser.two_factor_enabled = !is2FADisabledUpdate;
 
@@ -1378,7 +1383,7 @@ export class TelemetryService {
       .from('custom_threshold_presets')
       .select('*')
       .order('created_at', { ascending: false });
-    
+
     if (error) {
       this.logger.error(`Error fetching custom presets: ${error.message}`);
       throw new Error('Failed to fetch custom presets');
@@ -1405,7 +1410,8 @@ export class TelemetryService {
       .single();
 
     if (error) {
-      if (error.code === '23505') { // unique violation
+      if (error.code === '23505') {
+        // unique violation
         throw new Error('A preset with this name already exists.');
       }
       this.logger.error(`Error saving custom preset: ${error.message}`);
@@ -1435,7 +1441,7 @@ export class TelemetryService {
 
     // If we are disabling automation, we must also shut off all pumps to be safe
     const updatePayload: any = { ai_automation_enabled: enabled };
-    
+
     if (!enabled) {
       updatePayload.pump_water = false;
       updatePayload.pump_nitrogen = false;
@@ -1476,7 +1482,9 @@ export class TelemetryService {
   }
 
   async toggleAutoMister(deviceId: string, enabled: boolean) {
-    this.logger.log(`Toggling auto humidity mister for ${deviceId} to ${enabled}`);
+    this.logger.log(
+      `Toggling auto humidity mister for ${deviceId} to ${enabled}`,
+    );
 
     const { error } = await this.supabaseService
       .getClient()
@@ -1485,7 +1493,9 @@ export class TelemetryService {
       .eq('device_id', deviceId);
 
     if (error) {
-      this.logger.error(`Error toggling auto humidity mister: ${error.message}`);
+      this.logger.error(
+        `Error toggling auto humidity mister: ${error.message}`,
+      );
       throw new Error('Failed to toggle auto humidity mister');
     }
 

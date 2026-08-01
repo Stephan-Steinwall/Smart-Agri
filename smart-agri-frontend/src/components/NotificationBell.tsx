@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
+import { toast } from 'sonner';
 import { Bell, AlertTriangle, Info, AlertCircle, CheckCheck, BellOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -82,6 +83,19 @@ export default function NotificationBell() {
     },
   });
 
+  const markAllAsReadMutation = useMutation({
+    mutationFn: async () => {
+      await apiClient.patch(`/alerts/read-all`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unreadAlerts'] });
+      toast.success('All alerts cleared');
+    },
+    onError: (err: any) => {
+      toast.error(`Failed to clear alerts: ${err.message}`);
+    }
+  });
+
   const unreadCount = alerts.length;
 
   return (
@@ -141,14 +155,26 @@ export default function NotificationBell() {
               System Alerts
             </span>
           </div>
-          {unreadCount > 0 && (
-            <span
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold"
-              style={{ background: 'hsl(4, 80%, 95%)', color: 'hsl(4, 80%, 45%)' }}
-            >
-              {unreadCount} New
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <>
+                <span
+                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold"
+                  style={{ background: 'hsl(4, 80%, 95%)', color: 'hsl(4, 80%, 45%)' }}
+                >
+                  {unreadCount} New
+                </span>
+                <button
+                  onClick={() => markAllAsReadMutation.mutate()}
+                  disabled={markAllAsReadMutation.isPending}
+                  className="text-[11px] font-semibold transition-colors duration-150 hover:underline disabled:opacity-50"
+                  style={{ color: 'hsl(210, 68%, 45%)' }}
+                >
+                  Clear All
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Alert list */}

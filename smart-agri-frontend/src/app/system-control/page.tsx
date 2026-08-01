@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
 import { SUPPORTED_CROPS } from '@/lib/constants';
@@ -160,7 +162,7 @@ export default function SystemControlPage() {
       setThresholds(res.data);
     } catch (e: any) {
       console.error("Failed to fetch crop thresholds", e);
-      alert("Failed to fetch AI thresholds for this crop.");
+      toast.error("Failed to fetch AI thresholds for this crop.");
     } finally {
       setIsGeneratingPreset(false);
     }
@@ -194,7 +196,7 @@ export default function SystemControlPage() {
       setSelectedCrop('Manual');
     } catch (e: any) {
       console.error("Failed to delete preset", e);
-      alert("Failed to delete preset: " + (e.response?.data?.message || e.message));
+      toast.error("Failed to delete preset: " + (e.response?.data?.message || e.message));
     }
   };
 
@@ -212,7 +214,7 @@ export default function SystemControlPage() {
       await apiClient.post(`/ai/rain-prediction/${DEVICE_ID}/toggle`, { enabled: newState });
     } catch (e: any) {
       console.error("Failed to toggle prediction", e);
-      alert("Failed to update database: " + e.message);
+      toast.error("Failed to update database: " + e.message);
       setIsPredictionEnabled(!newState);
     } finally {
       setIsPredictionLoading(false);
@@ -227,7 +229,7 @@ export default function SystemControlPage() {
       await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/auto-grow-light/toggle`, { enabled: newState });
     } catch (e: any) {
       console.error("Failed to toggle auto grow light", e);
-      alert("Failed to update database: " + e.message);
+      toast.error("Failed to update database: " + e.message);
       setIsAutoGrowLightEnabled(!newState);
     } finally {
       setIsAutoGrowLightLoading(false);
@@ -242,7 +244,7 @@ export default function SystemControlPage() {
       await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/auto-mister/toggle`, { enabled: newState });
     } catch (e: any) {
       console.error("Failed to toggle auto mister", e);
-      alert("Failed to update database: " + e.message);
+      toast.error("Failed to update database: " + e.message);
       setIsAutoMisterEnabled(!newState);
     } finally {
       setIsAutoMisterLoading(false);
@@ -262,7 +264,7 @@ export default function SystemControlPage() {
           setSelectedCrop(presetName); // Auto-select the newly saved preset
         } catch (e: any) {
           console.error("Failed to save custom preset", e);
-          alert("Failed to save custom preset: " + (e.response?.data?.message || e.message));
+          toast.error("Failed to save custom preset: " + (e.response?.data?.message || e.message));
           return;
         }
       }
@@ -271,10 +273,10 @@ export default function SystemControlPage() {
     setIsSavingThresholds(true);
     try {
       await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/thresholds`, thresholds);
-      alert("Automation thresholds saved successfully!");
+      toast.success("Automation thresholds saved successfully!");
     } catch (e: any) {
       console.error("Failed to save thresholds", e);
-      alert("Failed to save thresholds: " + (e.response?.data?.message || e.message));
+      toast.error("Failed to save thresholds: " + (e.response?.data?.message || e.message));
     } finally {
       setIsSavingThresholds(false);
     }
@@ -491,11 +493,11 @@ export default function SystemControlPage() {
 
   const handlePumpToggle = async (pumpKey: string, dbName: string, forcedState?: boolean) => {
     if (!isSystemOn && forcedState !== false) {
-      alert("Cannot activate pump while Master System Switch is OFF. Please turn the System ON first.");
+      toast.error("Cannot activate pump while Master System Switch is OFF. Please turn the System ON first.");
       return;
     }
     if (emergencyStop && forcedState !== false) {
-      alert("Emergency Stop is currently engaged! Reset emergency lock before operating valves.");
+      toast.error("Emergency Stop is currently engaged! Reset emergency lock before operating valves.");
       return;
     }
 
@@ -511,7 +513,7 @@ export default function SystemControlPage() {
       refetchLogs();
     } catch (e: any) {
       console.error(`Failed to toggle ${pumpKey}`, e);
-      alert(`Failed to trigger ${pumpKey} command! Error: ` + (e.response?.data?.message || e.message));
+      toast.error(`Failed to trigger ${pumpKey} command! Error: ` + (e.response?.data?.message || e.message));
       // Revert UI on failure
       setPumps(prev => ({ ...prev, [pumpKey]: !newState }));
     }
@@ -532,6 +534,7 @@ export default function SystemControlPage() {
         potassium: false,
         light_01: pumps.light_01,
         light_02: pumps.light_02,
+        mister: pumps.mister,
       });
     }
 
@@ -541,7 +544,7 @@ export default function SystemControlPage() {
       });
     } catch (e: any) {
       console.error("Failed to toggle AI automation", e);
-      alert("Failed to toggle AI automation: " + (e.response?.data?.message || e.message));
+      toast.error("Failed to toggle AI automation: " + (e.response?.data?.message || e.message));
       setIsAiAutomationEnabled(!newState); // revert
     } finally {
       setIsAiToggleLoading(false);

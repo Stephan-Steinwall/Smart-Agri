@@ -18,7 +18,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 MODEL_FILE = os.getenv("MODEL_FILE", "models/crop_reference_model.joblib")
-RANDOM_SEED = int(os.getenv("RANDOM_SEED", 42))
+RANDOM_SEED = int(os.getenv("RANDOM_SEED", "42"))
 
 def main():
     print("=" * 60)

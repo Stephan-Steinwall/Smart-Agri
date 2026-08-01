@@ -11,6 +11,8 @@ import {
   Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { apiClient } from '@/lib/api';
@@ -113,7 +115,7 @@ export default function LocalWeatherPage() {
         setCoords({ lat: result.latitude, lon: result.longitude });
         setLocationName(`${result.name}, ${result.country_code}`);
       } else {
-        alert("Location not found. Please try another city name.");
+        toast.error("Location not found. Please try another city name.");
       }
     } catch (error) {
       console.error("Geocoding failed", error);

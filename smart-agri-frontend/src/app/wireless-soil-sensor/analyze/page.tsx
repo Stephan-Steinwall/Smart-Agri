@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from 'react';
+import { toast } from 'sonner';
+
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
 import Link from 'next/link';
@@ -638,7 +640,7 @@ export default function AnalyzeDataPage() {
     e.stopPropagation();
     const targetCrop = item.cropLabel || cropQuery.trim() || 'Tomato';
     if (!PLANT_OPTIONS.includes(targetCrop)) {
-      alert('This crop is not yet supported by the current recommendation model.');
+      toast.error('This crop is not yet supported by the current recommendation model.');
       return;
     }
 
@@ -663,7 +665,7 @@ export default function AnalyzeDataPage() {
       const evalData = res.data;
 
       if (evalData?.error) {
-        alert(`Unable to evaluate "${item.label}": ${evalData.error}`);
+        toast.error(`Unable to evaluate "${item.label}": ${evalData.error}`);
         return;
       }
 
@@ -693,10 +695,10 @@ export default function AnalyzeDataPage() {
       });
 
       queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID] });
-      alert(`Successfully evaluated saved record "${item.label}"! Recommended Crop: ${evalData.recommended_crop}`);
+      toast.success(`Successfully evaluated saved record "${item.label}"! Recommended Crop: ${evalData.recommended_crop}`);
     } catch (err: any) {
       const errMsg = err?.response?.data?.detail || err?.message || 'Failed to evaluate saved record.';
-      alert(`Error evaluating saved record: ${errMsg}`);
+      toast.error(`Error evaluating saved record: ${errMsg}`);
     }
   };
 
