@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun, FlaskConical, Sliders
+  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun, FlaskConical, Sliders, Map
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import AccountManagement from './AccountManagement';
@@ -20,6 +20,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { href: '/dashboard',      icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/farm-map',       icon: Map,             label: 'Farm Soil Map' },
   { href: '/wireless-soil-sensor', icon: Wifi,        label: 'Wireless Soil Sensor' },
   { 
     icon: FlaskConical,     
@@ -36,6 +37,7 @@ const navItems: NavItem[] = [
 
 const pageTitles: Record<string, string> = {
   '/dashboard':         'Farm Overview',
+  '/farm-map':          'Farm Soil Map',
   '/local-weather':     'Local Weather Station',
   '/field-data-analysis': 'Field Data Analysis',
   '/ai-assistant':      'AI Assistant',
