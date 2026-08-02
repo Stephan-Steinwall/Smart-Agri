@@ -41,6 +41,18 @@ export class TelemetryController {
   }
 
   @UseGuards(AuthGuard)
+  @Get('rain-deferral-status/:deviceId')
+  getRainDeferralStatus(@Param('deviceId') deviceId: string) {
+    return this.telemetryService.getRainDeferralStatus(deviceId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('mute-buzzer/:deviceId')
+  muteBuzzer(@Param('deviceId') deviceId: string) {
+    return this.telemetryService.muteBuzzer(deviceId);
+  }
+
+  @UseGuards(AuthGuard)
   @Get('environment/latest/:deviceId')
   getEnvironmentLatest(@Param('deviceId') deviceId: string) {
     return this.telemetryService.getEnvironmentLatest(deviceId);
@@ -80,6 +92,12 @@ export class TelemetryController {
   @Get('pump-logs/:deviceId')
   async getPumpLogs(@Param('deviceId') deviceId: string) {
     return this.telemetryService.getPumpLogs(deviceId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('pump-logs/delete')
+  async deletePumpLogs(@Body('logIds') logIds: string[]) {
+    return this.telemetryService.deletePumpLogs(logIds);
   }
 
   @UseGuards(AuthGuard)

@@ -64,6 +64,11 @@ export class AutomationService {
         return;
       }
 
+      // If the rain-blocking condition is no longer active, reset the buzzer mute flag
+      if (!(moisture < settings.moisture_threshold_low && willRain && !settings.pump_water)) {
+        this.telemetryService.resetBuzzerMute(deviceId);
+      }
+
       // 4. Automation logic - Water
       if (
         moisture < settings.moisture_threshold_low &&
@@ -84,9 +89,37 @@ export class AutomationService {
           `Soil moisture dropped to ${moisture.toFixed(0)}%. Auto-irrigation started.`,
         );
       } else if (
+        moisture < settings.moisture_threshold_low &&
+        willRain &&
+        !settings.pump_water
+      ) {
+        // Rain prediction is blocking irrigation!
+        // Activate buzzer for 15 seconds if it hasn't been muted by the user AND the feature is enabled
+        if (settings.rain_buzzer_enabled && !settings.buzzer_active && !this.telemetryService.isBuzzerMuted(deviceId)) {
+          this.logger.log(`[Auto-Control] Irrigation blocked by rain prediction. Activating buzzer for 15s.`);
+          await this.telemetryService.toggleSystemSwitch(
+            deviceId,
+            'buzzer_active',
+            true,
+          );
+          
+          // Turn off buzzer after 15 seconds
+          setTimeout(async () => {
+            await this.telemetryService.toggleSystemSwitch(
+              deviceId,
+              'buzzer_active',
+              false,
+            );
+            this.logger.log(`[Auto-Control] Buzzer deactivated after 15s.`);
+          }, 15000);
+        }
+      } else if (
         moisture >= settings.moisture_threshold_high &&
         settings.pump_water
       ) {
+        // If the rain condition clears or moisture goes high, reset the mute flag!
+        this.telemetryService.resetBuzzerMute(deviceId);
+
         this.logger.log(
           `[Auto-Control] Moisture ${moisture}% >= ${settings.moisture_threshold_high}%. Turning WATER pump OFF.`,
         );

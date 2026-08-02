@@ -232,10 +232,7 @@ export default function LoginPage() {
               </button>
             </form>
 
-            <div className="mt-8 text-center text-xs text-white/40 bg-white/5 p-3 rounded-xl border border-white/5">
-              Secure database authentication via <strong>user_accounts</strong> table.<br/>
-              Protected with Two-Step Verification.
-            </div>
+
           </>
         ) : (
           /* STEP 2: TWO-STEP VERIFICATION (2FA) */

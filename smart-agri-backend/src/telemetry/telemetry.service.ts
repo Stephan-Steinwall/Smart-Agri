@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { SensorReading } from './entities/sensor-reading.entity';
@@ -156,14 +156,54 @@ export class TelemetryService {
     };
   }
 
+  // Evaluates rain deferral strictly on the server-side to prevent UI mismatches
+  async getRainDeferralStatus(deviceId: string): Promise<{ showBanner: boolean }> {
+    const db = this.supabaseService.getClient();
+
+    // 1. Check latest telemetry safely without .single()
+    const { data: readingData } = await db
+      .from('soil_sensor_readings')
+      .select('soil_moisture_percent')
+      .eq('device_id', deviceId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    
+    const reading = readingData?.[0] || null;
+
+    // 2. Check system switches
+    const { data: switches } = await db
+      .from('system_switches')
+      .select('moisture_threshold_low, pump_water')
+      .eq('device_id', deviceId)
+      .single();
+
+    // 3. Check rain prediction
+    const { data: prediction } = await db
+      .from('rain_predictions')
+      .select('will_rain')
+      .eq('device_id', deviceId)
+      .single();
+
+    const moisture = reading?.soil_moisture_percent ?? 0;
+    const threshold = switches?.moisture_threshold_low ?? 0;
+    const willRain = prediction?.will_rain ?? false;
+    const isPumpOn = switches?.pump_water ?? false;
+
+    // Show banner if water is below threshold AND it will rain AND pump is currently OFF
+    const showBanner = (moisture < threshold) && willRain && !isPumpOn;
+
+    return { showBanner };
+  }
+
   // Get the absolute newest reading for our Live Cards
   async getLatestReading(deviceId: string): Promise<SensorReading | null> {
     const { data, error } = await this.supabaseService
       .getClient()
-      .from('latest_soil_reading')
+      .from('soil_sensor_readings')
       .select('*')
       .eq('device_id', deviceId)
-      .single();
+      .order('created_at', { ascending: false })
+      .limit(1);
 
     if (error) {
       this.logger.error(
@@ -172,7 +212,10 @@ export class TelemetryService {
       return null;
     }
 
-    return this.mapSupabaseToEntity(data);
+    if (data && data.length > 0) {
+      return this.mapSupabaseToEntity(data[0]);
+    }
+    return null;
   }
 
   // Get historical data for the charts (e.g., last 50 readings)
@@ -461,6 +504,23 @@ export class TelemetryService {
     return data || [];
   }
 
+  async deletePumpLogs(logIds: string[]) {
+    if (!logIds || logIds.length === 0) return { success: true, count: 0 };
+    
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('pump_activation_logs')
+      .delete()
+      .in('session_id', logIds)
+      .select();
+
+    if (error) {
+      this.logger.error(`Error deleting pump logs: ${error.message}`);
+      throw new Error('Failed to delete pump logs');
+    }
+    return { success: true, count: data?.length || 0 };
+  }
+
   async getSystemSwitches(deviceId: string) {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -476,11 +536,19 @@ export class TelemetryService {
     if (data) {
       return {
         ...data,
+        pump_water: data.pump_water ?? false,
+        pump_nitrogen: data.pump_nitrogen ?? false,
+        pump_phosphorus: data.pump_phosphorus ?? false,
+        pump_potassium: data.pump_potassium ?? false,
         system_switch: data.system_switch ?? true,
-        ai_automation_enabled: data.ai_automation_enabled ?? true,
-        auto_grow_light_enabled: data.auto_grow_light_enabled ?? false,
         light_01: data.light_01 ?? false,
         light_02: data.light_02 ?? false,
+        pump_mister: data.pump_mister ?? false,
+        buzzer_active: data.buzzer_active ?? false,
+        rain_buzzer_enabled: data.rain_buzzer_enabled ?? true,
+        ai_automation_enabled: data.ai_automation_enabled ?? true,
+        auto_grow_light_enabled: data.auto_grow_light_enabled ?? false,
+        auto_mister_enabled: data.auto_mister_enabled ?? false,
         moisture_threshold_low: data.moisture_threshold_low ?? 20,
         moisture_threshold_high: data.moisture_threshold_high ?? 50,
         nitrogen_threshold_low: data.nitrogen_threshold_low ?? 30,
@@ -491,6 +559,7 @@ export class TelemetryService {
         potassium_threshold_high: data.potassium_threshold_high ?? 70,
         light_intensity_threshold_lux:
           data.light_intensity_threshold_lux ?? 5000,
+        humidity_threshold_percent: data.humidity_threshold_percent ?? 45,
       };
     }
 
@@ -503,6 +572,12 @@ export class TelemetryService {
       system_switch: true,
       light_01: false,
       light_02: false,
+      pump_mister: false,
+      buzzer_active: false,
+      rain_buzzer_enabled: true,
+      ai_automation_enabled: true,
+      auto_grow_light_enabled: false,
+      auto_mister_enabled: false,
       moisture_threshold_low: 20,
       moisture_threshold_high: 50,
       nitrogen_threshold_low: 30,
@@ -512,6 +587,7 @@ export class TelemetryService {
       potassium_threshold_low: 30,
       potassium_threshold_high: 70,
       light_intensity_threshold_lux: 5000,
+      humidity_threshold_percent: 45,
     };
   }
 
@@ -525,6 +601,8 @@ export class TelemetryService {
       'light_01',
       'light_02',
       'pump_mister',
+      'buzzer_active',
+      'rain_buzzer_enabled',
     ];
     if (!validColumns.includes(pumpName)) {
       throw new Error('Invalid pump name');
@@ -636,6 +714,7 @@ export class TelemetryService {
         potassium_threshold_low: body.potassium_threshold_low,
         potassium_threshold_high: body.potassium_threshold_high,
         light_intensity_threshold_lux: body.light_intensity_threshold_lux,
+        humidity_threshold_percent: body.humidity_threshold_percent,
         updated_at: new Date().toISOString(),
       })
       .eq('device_id', deviceId)
@@ -1410,21 +1489,34 @@ export class TelemetryService {
     phosphorus_threshold_high: number;
     potassium_threshold_low: number;
     potassium_threshold_high: number;
+    [key: string]: any; // To allow extra fields to be passed but ignored
   }) {
+    const insertPayload = {
+      preset_name: payload.preset_name,
+      moisture_threshold_low: payload.moisture_threshold_low,
+      moisture_threshold_high: payload.moisture_threshold_high,
+      nitrogen_threshold_low: payload.nitrogen_threshold_low,
+      nitrogen_threshold_high: payload.nitrogen_threshold_high,
+      phosphorus_threshold_low: payload.phosphorus_threshold_low,
+      phosphorus_threshold_high: payload.phosphorus_threshold_high,
+      potassium_threshold_low: payload.potassium_threshold_low,
+      potassium_threshold_high: payload.potassium_threshold_high,
+    };
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('custom_threshold_presets')
-      .insert(payload)
+      .insert(insertPayload)
       .select()
       .single();
 
     if (error) {
       if (error.code === '23505') {
         // unique violation
-        throw new Error('A preset with this name already exists.');
+        throw new BadRequestException('A preset with this name already exists.');
       }
       this.logger.error(`Error saving custom preset: ${error.message}`);
-      throw new Error('Failed to save custom preset');
+      throw new InternalServerErrorException(`Failed to save custom preset: ${error.message}`);
     }
 
     return data;
@@ -1509,5 +1601,22 @@ export class TelemetryService {
     }
 
     return { success: true, auto_mister_enabled: enabled };
+  }
+
+  // --- Buzzer Mute Logic ---
+  private mutedBuzzerDevices = new Set<string>();
+
+  async muteBuzzer(deviceId: string) {
+    this.mutedBuzzerDevices.add(deviceId);
+    await this.toggleSystemSwitch(deviceId, 'buzzer_active', false);
+    return { success: true, muted: true };
+  }
+
+  isBuzzerMuted(deviceId: string): boolean {
+    return this.mutedBuzzerDevices.has(deviceId);
+  }
+
+  resetBuzzerMute(deviceId: string) {
+    this.mutedBuzzerDevices.delete(deviceId);
   }
 }

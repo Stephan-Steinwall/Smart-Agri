@@ -692,6 +692,7 @@ Do not add any extra commentary or fields.`;
       dew_point: r.dew_point_c,
       temp: r.air_temperature_c,
       dew_point_spread: r.dew_point_spread_c,
+      rain_detected: r.rain_detected,
     }));
 
     // 2. Fetch Regional Forecast from Open-Meteo

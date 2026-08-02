@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, LayersControl, useMap } from 'react-leaflet';
+import React, { useEffect, useState, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useQuery } from '@tanstack/react-query';
@@ -52,7 +52,7 @@ export type SoilReading = {
   time: string;
 };
 
-export default function FarmMapClient() {
+export default function FarmMapClient({ mapLayer = 'drone' }: { mapLayer?: 'drone' | 'osm' }) {
   const { data: history, isLoading, isError } = useQuery<SoilReading[]>({
     queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID],
     queryFn: async () => {
@@ -96,7 +96,7 @@ export default function FarmMapClient() {
     : defaultCenter;
 
   return (
-    <div className="w-full h-full min-h-[500px] flex flex-col rounded-[1.5rem] overflow-hidden border border-slate-200 dark:border-slate-800 relative shadow-sm">
+    <div className="w-full h-full min-h-[500px] flex flex-col relative z-0">
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[400] bg-white/90 dark:bg-slate-900/90 backdrop-blur px-4 py-2 rounded-full shadow-lg border border-slate-200 dark:border-slate-700 pointer-events-none">
         <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
           {validMarkers.length} Soil Samples Found
@@ -110,23 +110,21 @@ export default function FarmMapClient() {
         className="w-full h-full z-0 flex-1"
         scrollWheelZoom={true}
       >
-        <LayersControl position="topright">
-          <LayersControl.BaseLayer name="OpenStreetMap">
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-          </LayersControl.BaseLayer>
-          <LayersControl.BaseLayer checked name="Drone Orthomosaic">
-            <TileLayer
-              url="/farm_tiles/{z}/{x}/{y}.png"
-              minZoom={14}
-              maxZoom={20}
-              maxNativeZoom={20}
-              noWrap={true}
-            />
-          </LayersControl.BaseLayer>
-        </LayersControl>
+        {mapLayer === 'osm' && (
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        )}
+        {mapLayer === 'drone' && (
+          <TileLayer
+            url="/farm_tiles/{z}/{x}/{y}.png"
+            minZoom={14}
+            maxZoom={20}
+            maxNativeZoom={20}
+            noWrap={true}
+          />
+        )}
 
         {validMarkers.map((reading) => (
           <Marker

@@ -325,7 +325,7 @@ export default function AccountManagement() {
       sessionStorage.removeItem('systemControlUnlocked');
     }
     setIsOpen(false);
-    router.replace('/login');
+    router.replace('/');
   };
 
   return (

@@ -213,11 +213,8 @@ export default function WirelessSoilSensorPage() {
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Wireless Sensor Details</h2>
             <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
-              Node ID: {DEVICE_ID} · Location: {DEVICE_NAME}
+              Node ID: {DEVICE_ID}
             </p>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold" style={{ background: 'hsl(210, 68%, 95%)', color: 'hsl(210, 68%, 40%)' }}>
-            <Activity className="w-4 h-4" /> Live updates every 60s
           </div>
         </div>
 
@@ -252,7 +249,9 @@ export default function WirelessSoilSensorPage() {
                 </li>
                 <li className="flex justify-between items-center text-sm">
                   <span className="text-blue-800/80 font-semibold">Power Mode</span>
-                  <span className="font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded">Deep Sleep</span>
+                  <span className={`font-bold px-2 py-0.5 rounded ${connectivity === 'Connected' ? 'text-emerald-600 bg-emerald-100' : 'text-red-600 bg-red-100'}`}>
+                    {connectivity}
+                  </span>
                 </li>
               </ul>
             </div>

@@ -251,17 +251,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Bottom system status */}
         <div
-          className="flex-shrink-0 px-5 py-4 mx-3 mb-4 rounded-xl"
+          className="flex-shrink-0 px-5 py-4 mx-3 mb-4 rounded-xl flex items-center justify-center gap-2"
           style={{ background: 'var(--sidebar-accent)' }}
         >
-          <div className="flex items-center gap-2 mb-1">
-            <div className="status-dot-green" style={{ background: 'hsl(142, 65%, 45%)', boxShadow: 'none', width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0 }} />
-            <span className="text-xs font-semibold" style={{ color: 'hsl(142, 50%, 70%)' }}>System Online</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Wifi className="w-3 h-3" style={{ color: 'hsl(140, 10%, 50%)' }} />
-            <span className="text-[10px]" style={{ color: 'hsl(140, 10%, 50%)' }}>Sensor Network Active</span>
-          </div>
+          <div className="status-dot-green" style={{ background: 'hsl(142, 65%, 45%)', boxShadow: 'none', width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0 }} />
+          <span className="text-xs font-semibold" style={{ color: 'hsl(142, 50%, 70%)' }}>System Online</span>
         </div>
       </aside>
 
