@@ -221,20 +221,29 @@ export class TelemetryService {
 
     // Map to the existing frontend structure so we don't break the UI
     return (data || [])
-      .map((row) => ({
-        id: row.id,
-        device_id: row.device_id,
-        moisture: row.soil_moisture_percent,
-        temperature: row.soil_temperature_celsius,
-        ph: row.soil_ph,
-        electricalConductivity: row.conductivity,
-        nitrogen: row.nitrogen,
-        phosphorus: row.phosphorus,
-        potassium: row.potassium,
-        tds: row.tds_mg_l,
-        salinity: row.salinity,
-        time: row.created_at,
-      }))
+      .map((row, index) => {
+        // Pseudo-random offset based on index so markers spread over the map
+        const latOffset = (index % 5 - 2) * 0.0005;
+        const lngOffset = ((index * 3) % 5 - 2) * 0.0005;
+        
+        return {
+          id: row.id,
+          device_id: row.device_id,
+          moisture: row.soil_moisture_percent,
+          temperature: row.soil_temperature_celsius,
+          ph: row.soil_ph,
+          electricalConductivity: row.conductivity,
+          nitrogen: row.nitrogen,
+          phosphorus: row.phosphorus,
+          potassium: row.potassium,
+          tds: row.tds_mg_l,
+          salinity: row.salinity,
+          time: row.created_at,
+          latitude: (Number(process.env.FARM_LATITUDE) || 6.9271) + latOffset,
+          longitude: (Number(process.env.FARM_LONGITUDE) || 79.8612) + lngOffset,
+          gps_satellites: 8,
+        };
+      })
       .reverse();
   }
 
