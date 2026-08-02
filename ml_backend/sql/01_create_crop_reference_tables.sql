@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS public.crop_reference_profiles (
     ec_full_yield_max_dsm double precision NULL,
     ec_guidance_max_dsm double precision NOT NULL,
     moisture_paw_min double precision NOT NULL,
-    moisture_paw_max double precision NOT NULL,
+    moisture_paw_max double precision NOT NULL, 
     drainage_requirement text NOT NULL,
     local_notes text,
     source_urls text,

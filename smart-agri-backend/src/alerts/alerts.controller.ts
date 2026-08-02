@@ -19,8 +19,13 @@ export class AlertsController {
     return this.alertsService.listUnread(deviceId);
   }
 
+  @Patch('read-all')
+  markAllRead(@Query('deviceId') deviceId?: string) {
+    return this.alertsService.markAllRead(deviceId);
+  }
+
   @Patch(':id/read')
-  async markRead(@Param('id') id: string) {
+  markRead(@Param('id') id: string) {
     return this.alertsService.markRead(id);
   }
 }

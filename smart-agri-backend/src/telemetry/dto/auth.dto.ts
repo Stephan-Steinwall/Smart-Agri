@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsOptional, IsString, MinLength, IsBoolean } from 'class-validator';
 
 export class LoginDto {
   @IsString()
@@ -60,6 +60,10 @@ export class UpdateAccountDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  twoFactorEnabled?: boolean;
 }
 
 export class VerifySystemControlDto {

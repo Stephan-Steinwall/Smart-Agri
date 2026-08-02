@@ -190,7 +190,7 @@ async def evaluate_soil(request: EvaluateRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred during soil evaluation: {str(e)}"
-        )
+        ) from e
 
 @app.post("/rank", response_model=RankResponse, tags=["Evaluation"])
 async def rank_crops(request: RankRequest):
@@ -242,4 +242,4 @@ async def rank_crops(request: RankRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred while ranking crops: {str(e)}"
-        )
+        ) from e

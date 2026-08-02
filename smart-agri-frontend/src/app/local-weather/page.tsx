@@ -11,6 +11,8 @@ import {
   Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { apiClient } from '@/lib/api';
@@ -81,19 +83,6 @@ export default function LocalWeatherPage() {
   const [isLocating, setIsLocating] = useState(false);
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(true);
 
-  const handleTogglePrediction = async () => {
-    const newState = !isPredictionEnabled;
-    setIsPredictionEnabled(newState);
-    try {
-      await apiClient.post('/ai/rain-prediction/esp32_weather_01/toggle', { enabled: newState });
-    } catch (e: any) {
-      console.error("Failed to toggle prediction", e);
-      alert("Failed to update database: " + e.message);
-      // Revert state on failure
-      setIsPredictionEnabled(!newState);
-    }
-  };
-
   // Hydrate the toggle from the persisted server-side flag on load, instead
   // of always assuming "on" -- previously a disabled prediction silently
   // reset to enabled on every page refresh because nothing read this back.
@@ -126,7 +115,7 @@ export default function LocalWeatherPage() {
         setCoords({ lat: result.latitude, lon: result.longitude });
         setLocationName(`${result.name}, ${result.country_code}`);
       } else {
-        alert("Location not found. Please try another city name.");
+        toast.error("Location not found. Please try another city name.");
       }
     } catch (error) {
       console.error("Geocoding failed", error);
@@ -355,13 +344,11 @@ export default function LocalWeatherPage() {
             </div>
           </div>
           
-          <button 
-            disabled={aiFetching}
-            onClick={handleTogglePrediction}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${isPredictionEnabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-700'} ${aiFetching ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isPredictionEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-          </button>
+          <div className="flex items-center">
+            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${isPredictionEnabled ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
+              {isPredictionEnabled ? 'ON' : 'OFF'}
+            </span>
+          </div>
         </div>
         
         {!isPredictionEnabled ? (

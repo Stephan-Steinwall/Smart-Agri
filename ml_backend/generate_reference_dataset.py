@@ -14,8 +14,8 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-SAMPLES_PER_CROP = int(os.getenv("SAMPLES_PER_CROP", 250))
-RANDOM_SEED = int(os.getenv("RANDOM_SEED", 42))
+SAMPLES_PER_CROP = int(os.getenv("SAMPLES_PER_CROP", "250"))
+RANDOM_SEED = int(os.getenv("RANDOM_SEED", "42"))
 
 # Starter fallback profiles in case database table is not created/seeded yet
 FALLBACK_PROFILES = [

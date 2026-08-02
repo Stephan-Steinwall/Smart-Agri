@@ -1,15 +1,18 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
+import { SUPPORTED_CROPS } from '@/lib/constants';
 import Link from 'next/link';
 import {
   Power, Sliders, Zap, Droplets, FlaskConical, Sun, Bot, Activity,
   ShieldAlert, CheckCircle2, Clock, AlertTriangle, RefreshCw, Play,
   Square, Settings, Gauge, ChevronRight, Wifi, Layers, Sparkles,
   Timer, History, ArrowUpRight, Check, Flame, Radio, AlertCircle,
-  Lock, Eye, EyeOff, KeyRound
+  Lock, Eye, EyeOff, KeyRound, CloudRain, Trash2
 } from 'lucide-react';
 
 const DEVICE_ID = 'esp32_weather_01';
@@ -94,6 +97,7 @@ export default function SystemControlPage() {
     potassium: false,
     light_01: false,
     light_02: false,
+    mister: false,
   });
 
   // Light intensity simulated states (for UI visual feedback)
@@ -104,6 +108,179 @@ export default function SystemControlPage() {
 
   // Autonomous AI Irrigation automation state
   const [isAiAutomationEnabled, setIsAiAutomationEnabled] = useState(true);
+  const [isAutoGrowLightEnabled, setIsAutoGrowLightEnabled] = useState(false);
+  const [isAutoGrowLightLoading, setIsAutoGrowLightLoading] = useState(false);
+
+  const [isAutoMisterEnabled, setIsAutoMisterEnabled] = useState(false);
+  const [isAutoMisterLoading, setIsAutoMisterLoading] = useState(false);
+  
+  // Rain Prediction state
+  const [isPredictionEnabled, setIsPredictionEnabled] = useState(true);
+  const [isPredictionLoading, setIsPredictionLoading] = useState(false);
+
+  // Automation Thresholds state
+  const [thresholds, setThresholds] = useState({
+    moisture_threshold_low: 20, moisture_threshold_high: 50,
+    nitrogen_threshold_low: 30, nitrogen_threshold_high: 70,
+    phosphorus_threshold_low: 30, phosphorus_threshold_high: 70,
+    potassium_threshold_low: 30, potassium_threshold_high: 70,
+    light_intensity_threshold_lux: 5000,
+    humidity_threshold_percent: 50,
+  });
+  const [isSavingThresholds, setIsSavingThresholds] = useState(false);
+  const [thresholdsLoaded, setThresholdsLoaded] = useState(false);
+  const [selectedCrop, setSelectedCrop] = useState<string>('');
+  const [isGeneratingPreset, setIsGeneratingPreset] = useState(false);
+
+  const handleCropSelect = async (cropName: string) => {
+    setSelectedCrop(cropName);
+    if (cropName === 'Manual' || !cropName) return;
+
+    // Check if it's a custom preset
+    if (customPresets) {
+      const customPreset = customPresets.find((p: any) => p.preset_name === cropName);
+      if (customPreset) {
+        setThresholds({
+          moisture_threshold_low: customPreset.moisture_threshold_low,
+          moisture_threshold_high: customPreset.moisture_threshold_high,
+          nitrogen_threshold_low: customPreset.nitrogen_threshold_low,
+          nitrogen_threshold_high: customPreset.nitrogen_threshold_high,
+          phosphorus_threshold_low: customPreset.phosphorus_threshold_low,
+          phosphorus_threshold_high: customPreset.phosphorus_threshold_high,
+          potassium_threshold_low: customPreset.potassium_threshold_low,
+          potassium_threshold_high: customPreset.potassium_threshold_high,
+          light_intensity_threshold_lux: customPreset.light_intensity_threshold_lux ?? 5000,
+          humidity_threshold_percent: customPreset.humidity_threshold_percent ?? 50,
+        });
+        return;
+      }
+    }
+    
+    setIsGeneratingPreset(true);
+    try {
+      const res = await apiClient.get(`/ai/crop-thresholds/${cropName}`);
+      setThresholds(res.data);
+    } catch (e: any) {
+      console.error("Failed to fetch crop thresholds", e);
+      toast.error("Failed to fetch AI thresholds for this crop.");
+    } finally {
+      setIsGeneratingPreset(false);
+    }
+  };
+
+  const { data: predictionStatus } = useQuery({
+    queryKey: ['rainPredictionStatus'],
+    queryFn: async () => {
+      const res = await apiClient.get(`/ai/rain-prediction-status/${DEVICE_ID}`);
+      return res.data;
+    },
+  });
+
+  const { data: customPresets, refetch: refetchCustomPresets } = useQuery({
+    queryKey: ['customPresets'],
+    queryFn: async () => {
+      const res = await apiClient.get('/telemetry/custom-presets');
+      return res.data;
+    },
+  });
+
+  const handleDeleteCustomPreset = async (presetName: string) => {
+    const preset = customPresets?.find((p: any) => p.preset_name === presetName);
+    if (!preset) return;
+
+    if (!window.confirm(`Are you sure you want to delete the custom preset "${presetName}"?`)) return;
+
+    try {
+      await apiClient.post(`/telemetry/custom-presets/${preset.id}/delete`);
+      refetchCustomPresets();
+      setSelectedCrop('Manual');
+    } catch (e: any) {
+      console.error("Failed to delete preset", e);
+      toast.error("Failed to delete preset: " + (e.response?.data?.message || e.message));
+    }
+  };
+
+  useEffect(() => {
+    if (predictionStatus && typeof predictionStatus.prediction_enabled === 'boolean') {
+      setIsPredictionEnabled(predictionStatus.prediction_enabled);
+    }
+  }, [predictionStatus]);
+
+  const handleTogglePrediction = async () => {
+    const newState = !isPredictionEnabled;
+    setIsPredictionEnabled(newState);
+    setIsPredictionLoading(true);
+    try {
+      await apiClient.post(`/ai/rain-prediction/${DEVICE_ID}/toggle`, { enabled: newState });
+    } catch (e: any) {
+      console.error("Failed to toggle prediction", e);
+      toast.error("Failed to update database: " + e.message);
+      setIsPredictionEnabled(!newState);
+    } finally {
+      setIsPredictionLoading(false);
+    }
+  };
+
+  const handleToggleAutoGrowLight = async () => {
+    const newState = !isAutoGrowLightEnabled;
+    setIsAutoGrowLightEnabled(newState);
+    setIsAutoGrowLightLoading(true);
+    try {
+      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/auto-grow-light/toggle`, { enabled: newState });
+    } catch (e: any) {
+      console.error("Failed to toggle auto grow light", e);
+      toast.error("Failed to update database: " + e.message);
+      setIsAutoGrowLightEnabled(!newState);
+    } finally {
+      setIsAutoGrowLightLoading(false);
+    }
+  };
+
+  const handleToggleAutoMister = async () => {
+    const newState = !isAutoMisterEnabled;
+    setIsAutoMisterEnabled(newState);
+    setIsAutoMisterLoading(true);
+    try {
+      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/auto-mister/toggle`, { enabled: newState });
+    } catch (e: any) {
+      console.error("Failed to toggle auto mister", e);
+      toast.error("Failed to update database: " + e.message);
+      setIsAutoMisterEnabled(!newState);
+    } finally {
+      setIsAutoMisterLoading(false);
+    }
+  };
+
+  const handleSaveThresholds = async () => {
+    if (selectedCrop === 'Manual') {
+      const presetName = window.prompt("Enter a name to save this custom threshold profile (e.g., 'My Greenhouse Tomatoes'):");
+      if (presetName) {
+        try {
+          await apiClient.post('/telemetry/custom-presets', {
+            preset_name: presetName,
+            ...thresholds
+          });
+          refetchCustomPresets();
+          setSelectedCrop(presetName); // Auto-select the newly saved preset
+        } catch (e: any) {
+          console.error("Failed to save custom preset", e);
+          toast.error("Failed to save custom preset: " + (e.response?.data?.message || e.message));
+          return;
+        }
+      }
+    }
+
+    setIsSavingThresholds(true);
+    try {
+      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/thresholds`, thresholds);
+      toast.success("Automation thresholds saved successfully!");
+    } catch (e: any) {
+      console.error("Failed to save thresholds", e);
+      toast.error("Failed to save thresholds: " + (e.response?.data?.message || e.message));
+    } finally {
+      setIsSavingThresholds(false);
+    }
+  };
 
   // Timed dosing countdown simulation (in seconds remaining)
   const [activeTimers, setActiveTimers] = useState<Record<string, number>>({});
@@ -177,9 +354,34 @@ export default function SystemControlPage() {
         potassium: switchData.pump_potassium || false,
         light_01: switchData.light_01 || false,
         light_02: switchData.light_02 || false,
+        mister: switchData.pump_mister || false,
       });
       if (switchData.system_switch !== undefined && switchData.system_switch !== null) {
         setIsSystemOn(switchData.system_switch);
+      }
+      if (switchData.ai_automation_enabled !== undefined && switchData.ai_automation_enabled !== null) {
+        setIsAiAutomationEnabled(switchData.ai_automation_enabled);
+      }
+      if (switchData.auto_grow_light_enabled !== undefined && switchData.auto_grow_light_enabled !== null) {
+        setIsAutoGrowLightEnabled(switchData.auto_grow_light_enabled);
+      }
+      if (switchData.auto_mister_enabled !== undefined && switchData.auto_mister_enabled !== null) {
+        setIsAutoMisterEnabled(switchData.auto_mister_enabled);
+      }
+      if (!thresholdsLoaded && switchData.moisture_threshold_low !== undefined) {
+        setThresholds({
+          moisture_threshold_low: switchData.moisture_threshold_low,
+          moisture_threshold_high: switchData.moisture_threshold_high,
+          nitrogen_threshold_low: switchData.nitrogen_threshold_low,
+          nitrogen_threshold_high: switchData.nitrogen_threshold_high,
+          phosphorus_threshold_low: switchData.phosphorus_threshold_low,
+          phosphorus_threshold_high: switchData.phosphorus_threshold_high,
+          potassium_threshold_low: switchData.potassium_threshold_low,
+          potassium_threshold_high: switchData.potassium_threshold_high,
+          light_intensity_threshold_lux: switchData.light_intensity_threshold_lux ?? 5000,
+          humidity_threshold_percent: switchData.humidity_threshold_percent ?? 50,
+        });
+        setThresholdsLoaded(true);
       }
     }
   }, [switchData, emergencyStop]);
@@ -231,6 +433,7 @@ export default function SystemControlPage() {
         potassium: false,
         light_01: false,
         light_02: false,
+        mister: false,
       });
     }
     queryClient.setQueryData(['systemSwitches', DEVICE_ID], (old: any) =>
@@ -264,6 +467,7 @@ export default function SystemControlPage() {
       potassium: false,
       light_01: false,
       light_02: false,
+      mister: false,
     });
     setActiveTimers({});
 
@@ -287,41 +491,63 @@ export default function SystemControlPage() {
     handleSystemToggle(); // Turn system back on
   };
 
-  // Toggle individual pump/light
   const handlePumpToggle = async (pumpKey: string, dbName: string, forcedState?: boolean) => {
     if (!isSystemOn && forcedState !== false) {
-      alert("Cannot activate pump while Master System Switch is OFF. Please turn the System ON first.");
+      toast.error("Cannot activate pump while Master System Switch is OFF. Please turn the System ON first.");
       return;
     }
     if (emergencyStop && forcedState !== false) {
-      alert("Emergency Stop is currently engaged! Reset emergency lock before operating valves.");
+      toast.error("Emergency Stop is currently engaged! Reset emergency lock before operating valves.");
       return;
     }
 
     const newState = forcedState !== undefined ? forcedState : !pumps[pumpKey as keyof typeof pumps];
     setPumps(prev => ({ ...prev, [pumpKey]: newState }));
 
-    if (!newState && activeTimers[pumpKey]) {
-      setActiveTimers(prev => {
-        const copy = { ...prev };
-        delete copy[pumpKey];
-        return copy;
-      });
-    }
-
-    queryClient.setQueryData(['systemSwitches', DEVICE_ID], (old: any) =>
-      old ? { ...old, [dbName]: newState } : { [dbName]: newState }
-    );
-
+    // Send control command via backend
     try {
       await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
         pumpName: dbName,
         state: newState
       });
-      setTimeout(() => refetchLogs(), 500);
-    } catch (e) {
-      console.error('Failed to toggle pump', e);
+      refetchLogs();
+    } catch (e: any) {
+      console.error(`Failed to toggle ${pumpKey}`, e);
+      toast.error(`Failed to trigger ${pumpKey} command! Error: ` + (e.response?.data?.message || e.message));
+      // Revert UI on failure
       setPumps(prev => ({ ...prev, [pumpKey]: !newState }));
+    }
+  };
+
+  const [isAiToggleLoading, setIsAiToggleLoading] = useState(false);
+  const handleToggleAiAutomation = async () => {
+    const newState = !isAiAutomationEnabled;
+    setIsAiAutomationEnabled(newState);
+    setIsAiToggleLoading(true);
+
+    if (!newState) {
+      // Optimistically clear the UI pumps if we turn OFF automation (backend will do this too)
+      setPumps({
+        water: false,
+        nitrogen: false,
+        phosphorus: false,
+        potassium: false,
+        light_01: pumps.light_01,
+        light_02: pumps.light_02,
+        mister: pumps.mister,
+      });
+    }
+
+    try {
+      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/automation/toggle`, {
+        enabled: newState
+      });
+    } catch (e: any) {
+      console.error("Failed to toggle AI automation", e);
+      toast.error("Failed to toggle AI automation: " + (e.response?.data?.message || e.message));
+      setIsAiAutomationEnabled(!newState); // revert
+    } finally {
+      setIsAiToggleLoading(false);
     }
   };
 
@@ -455,7 +681,7 @@ export default function SystemControlPage() {
         </div>
       </div>
 
-      {/* ── Emergency Alert Banner (when active) ───────────────────────────── */}
+      {/* -- Environment Sensors (Light & Temp) ------------------------------- */}
       {emergencyStop && (
         <div className="rounded-2xl p-6 bg-red-600 text-white shadow-xl animate-bounce border-4 border-red-400 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -575,45 +801,188 @@ export default function SystemControlPage() {
         </div>
       </div>
 
-      {/* ── Autonomous AI Irrigation Automation Card ───────────────────────── */}
-      <section className="bg-gradient-to-r from-emerald-950/20 via-teal-950/20 to-slate-900/20 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-slate-900/40 border-2 border-emerald-500/30 rounded-[1.75rem] p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-              <Bot className="w-6 h-6 text-emerald-600 dark:text-emerald-400 animate-bounce" />
+      {/* -- Autonomous AI Irrigation Automation Card ------------------------- */}
+      <section className="relative group overflow-hidden bg-card border border-border rounded-[2rem] p-8 shadow-sm transition-all duration-500">
+        
+        <div className="relative z-10 flex flex-col md:flex-row md:items-start justify-between gap-8">
+          
+          <div className="flex items-start gap-5">
+            <div className="relative">
+              <div className="relative w-14 h-14 rounded-2xl bg-muted border border-border flex items-center justify-center flex-shrink-0 shadow-inner">
+                <Bot className="w-7 h-7 text-primary" />
+              </div>
             </div>
-            <div>
-              <div className="flex items-center gap-2.5 mb-1">
-                <h3 className="text-lg font-extrabold text-foreground">AI Autonomous Irrigation Engine</h3>
-                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                  isAiAutomationEnabled ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30' : 'bg-slate-500/20 text-slate-500 border border-slate-500/30'
+            
+            <div className="pt-1">
+              <div className="flex items-center gap-3 mb-2">
+                <h3 className="text-2xl font-extrabold text-foreground tracking-tight">AI Autonomous Engine</h3>
+                <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-colors duration-300 ${
+                  isAiAutomationEnabled 
+                    ? 'bg-primary/20 text-primary border border-primary/30' 
+                    : 'bg-muted text-muted-foreground border border-border'
                 }`}>
                   {isAiAutomationEnabled ? 'Active Guard' : 'Manual Override Only'}
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground max-w-3xl leading-relaxed">
-                When enabled, <span className="font-semibold text-foreground">AutomationService</span> continuously evaluates telemetry against localized weather forecasts. Water pumps trigger automatically when moisture drops below <span className="text-emerald-600 dark:text-emerald-400 font-bold">20%</span> and shuts off at <span className="text-emerald-600 dark:text-emerald-400 font-bold">50%</span> unless impending rainfall is detected.
+              <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed font-medium">
+                When enabled, the <span className="text-primary font-semibold">Agronomy AI Model</span> continuously evaluates telemetry against localized weather forecasts. All 4 pumps trigger automatically when their respective levels drop below your set <span className="text-primary font-bold">Low Threshold</span> and safely shut off at the <span className="text-primary font-bold">High Threshold</span>.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4 self-end md:self-center">
+          <div className="flex flex-col sm:flex-row items-center gap-4 self-end md:self-start md:mt-2">
             <button
-              onClick={() => setIsAiAutomationEnabled(!isAiAutomationEnabled)}
-              className={`px-5 py-3 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center gap-2.5 border ${
+              onClick={handleTogglePrediction}
+              disabled={isPredictionLoading}
+              className={`px-6 py-3.5 rounded-xl font-bold text-sm transition-all duration-300 flex items-center gap-2.5 border ${
+                isPredictionEnabled
+                  ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700 shadow-sm'
+                  : 'bg-background text-foreground border-border hover:bg-muted'
+              } ${isPredictionLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <CloudRain className="w-4 h-4" />
+              <span>{isPredictionEnabled ? 'Rain Prediction: ON' : 'Rain Prediction: OFF'}</span>
+            </button>
+
+            <button
+              onClick={handleToggleAiAutomation}
+              disabled={isAiToggleLoading}
+              className={`px-6 py-3.5 rounded-xl font-bold text-sm transition-all duration-300 flex items-center gap-2.5 border ${
                 isAiAutomationEnabled
-                  ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700 shadow-emerald-600/20'
-                  : 'bg-card text-foreground border-border hover:bg-muted/50'
-              }`}
+                  ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700 shadow-sm'
+                  : 'bg-background text-foreground border-border hover:bg-muted'
+              } ${isAiToggleLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <Sparkles className="w-4 h-4" />
               <span>{isAiAutomationEnabled ? 'AI Engine: ON' : 'AI Engine: OFF'}</span>
             </button>
           </div>
         </div>
+
+        {/* Threshold Settings Panel */}
+        {isAiAutomationEnabled && (
+          <div className="relative z-10 mt-10 pt-8 border-t border-border animate-fade-in-up">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8 bg-muted/40 p-5 rounded-2xl border border-border">
+              <div>
+                <h4 className="text-base font-extrabold text-foreground tracking-wide">Custom Automation Thresholds</h4>
+                <p className="text-xs text-muted-foreground mt-1 font-medium">Fine-tune precisely when the AI should trigger each nutrient and water pump.</p>
+              </div>
+              
+              <div className="flex items-center gap-3 bg-background px-4 py-2.5 rounded-xl border border-border shadow-inner">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                  <Layers className="w-3.5 h-3.5" />
+                  Crop Preset:
+                </label>
+                <select 
+                  className="bg-background border border-border hover:border-primary/50 rounded-lg text-sm font-semibold px-3 py-1.5 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-colors cursor-pointer text-foreground"
+                  value={selectedCrop}
+                  onChange={(e) => handleCropSelect(e.target.value)}
+                  disabled={isGeneratingPreset}
+                >
+                  <option value="" disabled className="bg-background">
+                    {isGeneratingPreset ? 'Generating AI Thresholds...' : 'Select a crop...'}
+                  </option>
+                  <option value="Manual" className="bg-background text-primary font-bold">Manual (Custom)</option>
+                  
+                  {customPresets && customPresets.length > 0 && (
+                    <optgroup label="My Custom Presets" className="bg-background text-muted-foreground font-bold">
+                      {customPresets.map((preset: any) => (
+                        <option key={preset.id} value={preset.preset_name} className="text-foreground font-medium">
+                          {preset.preset_name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+
+                  <optgroup label="AI Defaults" className="bg-background text-muted-foreground font-bold">
+                    {SUPPORTED_CROPS.map(crop => (
+                      <option key={crop} value={crop} className="text-foreground font-medium">
+                        {crop}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+
+                {/* Show delete button if a custom preset is currently selected */}
+                {customPresets?.some((p: any) => p.preset_name === selectedCrop) && (
+                  <button
+                    onClick={() => handleDeleteCustomPreset(selectedCrop)}
+                    className="p-2 text-red-500 hover:text-red-600 hover:bg-red-500/10 rounded-lg transition-all border border-transparent hover:border-red-500/30 ml-1"
+                    title="Delete this custom preset"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[
+              { id: 'moisture', label: 'Soil Moisture', unit: '%', colorClass: 'text-blue-500', accentClass: 'accent-blue-500' },
+              { id: 'nitrogen', label: 'Nitrogen (N)', unit: 'mg/kg', colorClass: 'text-emerald-600', accentClass: 'accent-emerald-600' },
+              { id: 'phosphorus', label: 'Phosphorus (P)', unit: 'mg/kg', colorClass: 'text-purple-500', accentClass: 'accent-purple-500' },
+              { id: 'potassium', label: 'Potassium (K)', unit: 'mg/kg', colorClass: 'text-orange-600', accentClass: 'accent-orange-600' },
+            ].map(metric => (
+              <div key={metric.id} className="bg-background rounded-2xl p-5 border border-border shadow-sm transition-all hover:shadow-md">
+                <div className="flex justify-between items-center mb-4 border-b border-border pb-3">
+                  <span className="text-sm font-extrabold text-foreground">{metric.label}</span>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground px-2.5 py-1 bg-muted rounded-full">Auto Bounds</span>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex justify-between text-xs mb-1.5">
+                      <span className="text-muted-foreground font-medium">Turn ON below:</span>
+                      <span className={`font-bold ${metric.colorClass}`}>{(thresholds as any)[`${metric.id}_threshold_low`]} {metric.unit}</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="100" 
+                      value={(thresholds as any)[`${metric.id}_threshold_low`]}
+                      onChange={e => {
+                        setThresholds({...thresholds, [`${metric.id}_threshold_low`]: parseInt(e.target.value)});
+                        if (selectedCrop !== 'Manual') setSelectedCrop('Manual');
+                      }}
+                      className={`w-full ${metric.accentClass} cursor-pointer`}
+                    />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-xs mb-1.5 mt-4">
+                      <span className="text-muted-foreground font-medium">Turn OFF above:</span>
+                      <span className={`font-bold ${metric.colorClass}`}>{(thresholds as any)[`${metric.id}_threshold_high`]} {metric.unit}</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="100" 
+                      value={(thresholds as any)[`${metric.id}_threshold_high`]}
+                      onChange={e => {
+                        setThresholds({...thresholds, [`${metric.id}_threshold_high`]: parseInt(e.target.value)});
+                        if (selectedCrop !== 'Manual') setSelectedCrop('Manual');
+                      }}
+                      className={`w-full ${metric.accentClass} cursor-pointer`}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+            
+            <div className="col-span-full flex justify-end mt-4">
+              <button
+                onClick={handleSaveThresholds}
+                disabled={isSavingThresholds}
+                className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-xl shadow-sm transition-all flex items-center gap-2 active:scale-95"
+              >
+                {isSavingThresholds ? 'Saving...' : 'Save Threshold Settings'}
+              </button>
+            </div>
+            </div>
+          </div>
+        )}
       </section>
 
-      {/* ── Manual Override Controls (Irrigation & Nutrients) ──────────────── */}
+      {/* -- Manual Override Controls (Irrigation & Nutrients) ---------------- */}
       <section className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-3">
@@ -910,15 +1279,65 @@ export default function SystemControlPage() {
 
       {/* ── Grow Lights & Spectrum Regulation ──────────────────────────────── */}
       <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-yellow-50 dark:bg-yellow-950/50 text-yellow-600 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800/60">
-            <Sun className="w-5 h-5" />
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-yellow-50 dark:bg-yellow-950/50 text-yellow-600 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800/60">
+              <Sun className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-lg text-foreground">Grow Lights & Photosynthetic Spectra</h3>
+              <p className="text-xs text-muted-foreground">Manage full-spectrum LED fixtures and supplemental UV/IR bloom enhancers</p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-extrabold text-lg text-foreground">Grow Lights & Photosynthetic Spectra</h3>
-            <p className="text-xs text-muted-foreground">Manage full-spectrum LED fixtures and supplemental UV/IR bloom enhancers</p>
-          </div>
+          
+          <button
+            onClick={handleToggleAutoGrowLight}
+            disabled={isAutoGrowLightLoading}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all border ${
+              isAutoGrowLightEnabled 
+                ? 'bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800/50 text-yellow-700 dark:text-yellow-400' 
+                : 'bg-card border-border hover:bg-muted text-muted-foreground'
+            } ${isAutoGrowLightLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <div className="flex flex-col items-start mr-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">Weather Sync</span>
+              <span className="text-sm font-extrabold leading-none">Auto Grow Light</span>
+            </div>
+            <div className={`w-12 h-6 rounded-full transition-all p-0.5 flex items-center ${
+              isAutoGrowLightEnabled ? 'bg-yellow-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+            }`}>
+              <span className="w-5 h-5 rounded-full bg-white shadow-sm block" />
+            </div>
+          </button>
         </div>
+
+        {isAutoGrowLightEnabled && (
+          <div className="bg-yellow-50/30 dark:bg-yellow-950/10 border border-yellow-200/50 dark:border-yellow-900/50 p-4 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex-1 w-full">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-foreground">Activation Threshold (Lux)</span>
+                <span className="text-sm font-bold text-yellow-600 dark:text-yellow-400">{thresholds.light_intensity_threshold_lux} lux</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="50000"
+                step="500"
+                value={thresholds.light_intensity_threshold_lux}
+                onChange={(e) => setThresholds({ ...thresholds, light_intensity_threshold_lux: Number(e.target.value) })}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer dark:bg-slate-700 accent-yellow-500"
+              />
+              <p className="text-xs text-muted-foreground mt-2">If the outdoor light intensity drops below this value, the main grow light will turn on automatically.</p>
+            </div>
+            <button
+              onClick={handleSaveThresholds}
+              disabled={isSavingThresholds}
+              className="w-full md:w-auto px-6 py-2 bg-yellow-500 text-white rounded-lg font-bold text-sm hover:bg-yellow-600 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              {isSavingThresholds ? 'Saving...' : 'Save Threshold'}
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           
@@ -1030,6 +1449,106 @@ export default function SystemControlPage() {
             </div>
           </div>
 
+        </div>
+      </section>
+
+      {/* ── Humidity Mister & Climate Control ────────────────────────────────── */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800/60">
+              <CloudRain className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-lg text-foreground">Humidity & Climate Control</h3>
+              <p className="text-xs text-muted-foreground">Manage overhead humidity misters to prevent crop desiccation</p>
+            </div>
+          </div>
+          
+          <button
+            onClick={handleToggleAutoMister}
+            disabled={isAutoMisterLoading}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all border ${
+              isAutoMisterEnabled 
+                ? 'bg-cyan-50 dark:bg-cyan-950/20 border-cyan-200 dark:border-cyan-800/50 text-cyan-700 dark:text-cyan-400' 
+                : 'bg-card border-border hover:bg-muted text-muted-foreground'
+            } ${isAutoMisterLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <div className="flex flex-col items-start mr-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">Climate Sync</span>
+              <span className="text-sm font-extrabold leading-none">Auto Mister</span>
+            </div>
+            <div className={`w-12 h-6 rounded-full transition-all p-0.5 flex items-center ${
+              isAutoMisterEnabled ? 'bg-cyan-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+            }`}>
+              <span className="w-5 h-5 rounded-full bg-white shadow-sm block" />
+            </div>
+          </button>
+        </div>
+
+        {isAutoMisterEnabled && (
+          <div className="bg-cyan-50/30 dark:bg-cyan-950/10 border border-cyan-200/50 dark:border-cyan-900/50 p-4 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex-1 w-full">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-foreground">Activation Threshold (%)</span>
+                <span className="text-sm font-bold text-cyan-600 dark:text-cyan-400">{thresholds.humidity_threshold_percent}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={thresholds.humidity_threshold_percent}
+                onChange={(e) => setThresholds({ ...thresholds, humidity_threshold_percent: Number(e.target.value) })}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer dark:bg-slate-700 accent-cyan-500"
+              />
+              <p className="text-xs text-muted-foreground mt-2">If the ambient humidity drops below this value, the overhead mister will turn on automatically.</p>
+            </div>
+            <button
+              onClick={handleSaveThresholds}
+              disabled={isSavingThresholds}
+              className="w-full md:w-auto px-6 py-2 bg-cyan-500 text-white rounded-lg font-bold text-sm hover:bg-cyan-600 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              {isSavingThresholds ? 'Saving...' : 'Save Threshold'}
+            </button>
+          </div>
+        )}
+
+        <div className={`rounded-[1.75rem] p-6 transition-all border-2 ${
+          pumps.mister
+            ? 'bg-cyan-50/40 dark:bg-cyan-950/20 border-cyan-500 shadow-[0_12px_35px_rgba(6,182,212,0.15)]'
+            : 'bg-card border-border hover:border-slate-300 dark:hover:border-slate-700 shadow-sm'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${
+                pumps.mister ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/30 scale-110' : 'bg-muted text-muted-foreground'
+              }`}>
+                <CloudRain className={`w-7 h-7 ${pumps.mister ? 'animate-bounce' : ''}`} />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-foreground">Overhead Humidity Mister</h4>
+                <p className="text-xs text-muted-foreground">High-pressure fogging system</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              {activeTimers['mister'] && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 rounded-lg text-xs font-bold font-mono animate-pulse">
+                  <Timer className="w-3.5 h-3.5" />
+                  {activeTimers['mister']}s
+                </div>
+              )}
+              <button
+                onClick={() => handlePumpToggle('mister', 'pump_mister')}
+                className={`w-16 h-9 rounded-full transition-all p-1 flex items-center ${
+                  pumps.mister ? 'bg-cyan-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                }`}
+              >
+                <span className="w-7 h-7 rounded-full bg-white shadow-md block" />
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 

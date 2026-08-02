@@ -87,7 +87,24 @@ export class AiService {
       You are an expert Agronomy AI Assistant managing a Smart Agriculture Platform.
       You provide concise, professional, and actionable advice to farmers based on raw data.
 
-      CURRENT SENSOR DATA CONTEXT:
+      You have access to a tool 'fetch_data_from_supabase' to query the database.
+      CRITICAL RULES:
+      1. You are strictly READ-ONLY. You MUST NOT attempt to edit, insert, or delete data.
+      2. You MUST NOT access or reveal any passwords or sensitive user credentials.
+      3. You MUST NOT control the system, such as switching pumps, modifying settings, or altering 'system_switches'. You can only READ the state and reply to the user.
+
+      DATABASE SCHEMA AVAILABLE:
+      - "Wireless sensor Soil Analysis data" (soil_moisture, temperature, soil_ph, soil_conductivity, nitrogen, phosphorus, potassium, recommended_crop, device_id, crop_label, reading_at)
+      - custom_threshold_presets (moisture_threshold_low/high, nitrogen_threshold_low/high, phosphorus_threshold_low/high, potassium_threshold_low/high)
+      - environment_sensor_readings (light_intensity_lux, soil_temperature_c, air_temperature_c, humidity_percent, rain_detected, recorded_at)
+      - latest_soil_reading (soil_moisture_percent, soil_temperature_celsius, ec_levels, soil_ph, nitrogen, phosphorus, potassium, salinity, tds_mg_l, sensor_status)
+      - pump_activation_logs (session_id, device_id, pump_name, start_time, end_time, status)
+      - soil_readings (soil_moisture_percent, soil_temperature_celsius, soil_ph, nitrogen, phosphorus, potassium, created_at)
+      - soil_sensor_readings (soil_moisture_percent, soil_temperature_celsius, conductivity, soil_ph, nitrogen, phosphorus, potassium, created_at)
+      - system_alerts (severity, message, created_at, read_at)
+      - system_switches (device_id, pump_water, pump_nitrogen, pump_phosphorus, pump_potassium, system_switch, light_01, light_02, etc.)
+
+      CURRENT SENSOR DATA CONTEXT (Device: ${deviceId}):
       - Time of reading: ${latestReading.time}
       - Soil Moisture: ${latestReading.moisture}% (Optimal range: 40-70%)
       - Temperature: ${latestReading.temperature}°C
@@ -97,7 +114,7 @@ export class AiService {
       - pH Level: ${latestReading.ph}
 
       INSTRUCTIONS:
-      Answer the user's question directly based on the data above. Do not hallucinate data.
+      Answer the user's question directly based on the data above or by querying the database if historical or other tables' data is needed. Do not hallucinate data.
       If moisture is below 30%, recommend immediate irrigation.
       Keep responses concise and actionable.
     `;
@@ -116,14 +133,85 @@ export class AiService {
     // Add the new user query
     messages.push({ role: 'user', content: query });
 
-    // 4. Call OpenAI
-    const response = await this.openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: messages,
-      temperature: 0.2, // Low temperature for factual, analytical responses
-    });
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'fetch_data_from_supabase',
+          description: 'Fetch data from the Supabase database. You can only read data, not modify it.',
+          parameters: {
+            type: 'object',
+            properties: {
+              table_name: { type: 'string', description: 'The name of the table to query' },
+              select_columns: { type: 'string', description: "The columns to select, comma separated (default '*')" },
+              limit: { type: 'number', description: 'Maximum number of rows to return (default 10)' },
+              order_by_column: { type: 'string', description: 'Optional column to order by' },
+              order_by_ascending: { type: 'boolean', description: 'Set to false for descending order (default false)' },
+              eq_filter_column: { type: 'string', description: 'Optional column to filter by equality' },
+              eq_filter_value: { type: 'string', description: 'Optional value for the equality filter' }
+            },
+            required: ['table_name']
+          }
+        }
+      }
+    ];
 
-    const answer = response.choices[0].message.content;
+    let continueProcessing = true;
+    let answer = "";
+
+    while (continueProcessing) {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo-0125', // Use a model version that reliably supports tools
+        messages: messages,
+        temperature: 0.2, // Low temperature for factual, analytical responses
+        tools: tools as any,
+        tool_choice: 'auto'
+      });
+
+      const message = response.choices[0].message;
+      messages.push(message as any);
+
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        for (const tc of message.tool_calls) {
+          const toolCall = tc as any;
+          if (toolCall.function?.name === 'fetch_data_from_supabase') {
+            try {
+              const args = JSON.parse(toolCall.function.arguments);
+              let queryObj: any = this.supabaseService.getClient().from(args.table_name).select(args.select_columns || '*');
+              
+              if (args.eq_filter_column && args.eq_filter_value) {
+                queryObj = queryObj.eq(args.eq_filter_column, args.eq_filter_value);
+              }
+              
+              if (args.order_by_column) {
+                queryObj = queryObj.order(args.order_by_column, { ascending: args.order_by_ascending ?? false });
+              }
+              
+              queryObj = queryObj.limit(args.limit || 10);
+              
+              const { data, error } = await queryObj;
+              
+              messages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: toolCall.function.name,
+                content: error ? JSON.stringify({ error: error.message }) : JSON.stringify(data)
+              });
+            } catch (err: any) {
+              messages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: toolCall.function.name,
+                content: JSON.stringify({ error: err.message })
+              });
+            }
+          }
+        }
+      } else {
+        continueProcessing = false;
+        answer = message.content || "";
+      }
+    }
 
     // 5. Save the new messages to Chat History
     if (answer) {
@@ -568,6 +656,22 @@ Do not add any extra commentary or fields.`;
     return data;
   }
 
+  async deleteChatHistory(sessionId: string) {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('ai_chat_history')
+      .delete()
+      .eq('session_id', sessionId);
+
+    if (error) {
+      this.logger.error(
+        `Error deleting history for session ${sessionId}: ${error.message}`,
+      );
+      throw new Error(`Failed to delete chat history: ${error.message}`);
+    }
+    return { success: true };
+  }
+
   // ── Rain prediction ──────────────────────────────────────────────────────
   // lat/lon default to the fixed farm location (FARM_LATITUDE/FARM_LONGITUDE),
   // NOT the caller's browser location -- the local sensor trend this fuses
@@ -774,5 +878,59 @@ Do not add any extra commentary or fields.`;
       will_rain: data?.will_rain ?? false,
       prediction_enabled: data?.prediction_enabled ?? true,
     };
+  }
+
+  async getCropThresholds(cropName: string) {
+    this.logger.log(`Generating AI thresholds for crop: ${cropName}`);
+
+    const systemPrompt = `
+      You are an expert Agronomy AI.
+      Determine the optimal automation boundaries for a smart irrigation and fertigation system for growing the crop: ${cropName}.
+      Provide the safe and optimal Low (turn ON) and High (turn OFF) thresholds for:
+      - Soil Moisture (%)
+      - Nitrogen (mg/kg)
+      - Phosphorus (mg/kg)
+      - Potassium (mg/kg)
+
+      You MUST respond with ONLY a raw JSON object and nothing else. No markdown wrapping.
+      The JSON structure MUST exactly match the following:
+      {
+        "moisture_threshold_low": number,
+        "moisture_threshold_high": number,
+        "nitrogen_threshold_low": number,
+        "nitrogen_threshold_high": number,
+        "phosphorus_threshold_low": number,
+        "phosphorus_threshold_high": number,
+        "potassium_threshold_low": number,
+        "potassium_threshold_high": number
+      }
+    `;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'system', content: systemPrompt }],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      });
+
+      const jsonStr = response.choices[0].message.content || '{}';
+      return JSON.parse(jsonStr);
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to generate crop thresholds for ${cropName}: ${error.message}`,
+      );
+      // Fallback values if AI fails
+      return {
+        moisture_threshold_low: 40,
+        moisture_threshold_high: 60,
+        nitrogen_threshold_low: 30,
+        nitrogen_threshold_high: 50,
+        phosphorus_threshold_low: 30,
+        phosphorus_threshold_high: 50,
+        potassium_threshold_low: 30,
+        potassium_threshold_high: 50,
+      };
+    }
   }
 }

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import AccountManagement from './AccountManagement';
+import { toast } from 'sonner';
 
 type NavItem = {
   href?: string;
@@ -49,7 +50,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     if (pathname === '/' || pathname === '/login') {
-      setIsAuthorized(true);
+      setTimeout(() => setIsAuthorized(true), 0);
       return;
     }
 
@@ -65,7 +66,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (user.sessionExpiresAt && Date.now() > user.sessionExpiresAt) {
           localStorage.removeItem('userAccount');
           setIsAuthorized(false);
-          alert('Your session has expired for security reasons. Please log in again.');
+          toast.error('Your session has expired for security reasons. Please log in again.');
           router.replace('/login');
           return;
         }

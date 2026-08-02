@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from 'react';
+import { toast } from 'sonner';
+
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
 import Link from 'next/link';
@@ -254,6 +256,11 @@ export default function AnalyzeDataPage() {
   const [saveError, setSaveError] = useState('');
   const [saveToastVisible, setSaveToastVisible] = useState(false);
   const [saveToastText, setSaveToastText] = useState('Analysis saved successfully.');
+
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const queryClient = useQueryClient();
 
@@ -633,7 +640,7 @@ export default function AnalyzeDataPage() {
     e.stopPropagation();
     const targetCrop = item.cropLabel || cropQuery.trim() || 'Tomato';
     if (!PLANT_OPTIONS.includes(targetCrop)) {
-      alert('This crop is not yet supported by the current recommendation model.');
+      toast.error('This crop is not yet supported by the current recommendation model.');
       return;
     }
 
@@ -658,7 +665,7 @@ export default function AnalyzeDataPage() {
       const evalData = res.data;
 
       if (evalData?.error) {
-        alert(`Unable to evaluate "${item.label}": ${evalData.error}`);
+        toast.error(`Unable to evaluate "${item.label}": ${evalData.error}`);
         return;
       }
 
@@ -688,15 +695,52 @@ export default function AnalyzeDataPage() {
       });
 
       queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID] });
-      alert(`Successfully evaluated saved record "${item.label}"! Recommended Crop: ${evalData.recommended_crop}`);
+      toast.success(`Successfully evaluated saved record "${item.label}"! Recommended Crop: ${evalData.recommended_crop}`);
     } catch (err: any) {
       const errMsg = err?.response?.data?.detail || err?.message || 'Failed to evaluate saved record.';
-      alert(`Error evaluating saved record: ${errMsg}`);
+      toast.error(`Error evaluating saved record: ${errMsg}`);
     }
   };
 
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = () => {
     if (selectedIds.length === 0) return;
+    setDeletePassword('');
+    setDeleteError('');
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDeleteSelected = async () => {
+    setIsDeleting(true);
+    setDeleteError('');
+
+    let userEmail = 'admin@smartagri.io';
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('userAccount');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          userEmail = parsed.email || parsed.username || userEmail;
+        } catch (err) {}
+      }
+    }
+
+    try {
+      const authRes = await apiClient.post('/telemetry/auth/verify-system-control', {
+        emailOrUsername: userEmail,
+        password: deletePassword
+      });
+
+      if (!authRes.data || !authRes.data.success) {
+        setDeleteError(authRes.data?.message || 'Invalid System Control security password.');
+        setIsDeleting(false);
+        return;
+      }
+    } catch (err: any) {
+      setDeleteError(err?.response?.data?.message || 'Failed to verify password. Please try again.');
+      setIsDeleting(false);
+      return;
+    }
+
     try {
       // Separate UUID-like ids (to delete from DB) from local-only ids
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -722,8 +766,12 @@ export default function AnalyzeDataPage() {
       // Invalidate queries so recent readings / table reflect deletion
       queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorLatest', DEVICE_ID] });
       queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID] });
+      
+      setDeleteModalOpen(false);
     } catch (err) {
-      setSaveError('Failed to delete selected analyses.');
+      setDeleteError('Failed to delete selected analyses.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1172,7 +1220,7 @@ export default function AnalyzeDataPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={async (e) => { e.stopPropagation(); if (selectedIds.length === 0) return; if (!confirm(`Delete ${selectedIds.length} selected analysis?`)) return; await handleDeleteSelected(); }}
+              onClick={async (e) => { e.stopPropagation(); if (selectedIds.length === 0) return; await handleDeleteSelected(); }}
               disabled={selectedIds.length === 0}
               className="rounded-xl px-3 py-2 text-sm font-semibold transition disabled:opacity-50 bg-red-600 text-white"
             >
@@ -1218,24 +1266,11 @@ export default function AnalyzeDataPage() {
                       }}
                     >
                       <td className="px-3 py-3 font-semibold" style={{ color: 'var(--foreground)' }}>{item.label}</td>
-                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                        <select
-                          value={item.cropLabel || ''}
-                          onChange={(e) => {
-                            const newCrop = e.target.value;
-                            setSavedAnalyses((prev) =>
-                              prev.map((r) =>
-                                r.id === item.id ? { ...r, cropLabel: newCrop } : r
-                              )
-                            );
-                          }}
-                          className="rounded-lg border border-slate-200 bg-white dark:bg-slate-800 px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500 shadow-sm cursor-pointer"
-                        >
-                          <option value="">🌱 Select crop...</option>
-                          {CROP_OPTIONS_DATA.map((crop) => (
-                            <option key={crop.id} value={crop.id}>{crop.icon} {crop.name}</option>
-                          ))}
-                        </select>
+                      <td className="px-3 py-3 font-medium text-blue-600 dark:text-blue-400">
+                        {(() => {
+                          const crop = CROP_OPTIONS_DATA.find(c => c.id === item.cropLabel);
+                          return crop ? `${crop.icon} ${crop.name}` : (item.cropLabel || '🌱 None');
+                        })()}
                       </td>
                       <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{new Date(item.createdAt).toLocaleString()}</td>
                       <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.moisture)}</td>
@@ -1265,6 +1300,60 @@ export default function AnalyzeDataPage() {
           </div>
         )}
       </section>
+
+      {/* Delete Confirmation Modal */}
+      {deleteModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in px-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800 animate-scale-in">
+            <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--foreground)' }}>Security Authorization Required</h2>
+            <p className="text-sm mb-6 text-slate-600 dark:text-slate-400">
+              Please enter the System Control security password to delete {selectedIds.length} selected analysis record{selectedIds.length > 1 ? 's' : ''}.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Password</label>
+                <input
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && deletePassword && !isDeleting) confirmDeleteSelected();
+                  }}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm focus:border-red-500 focus:ring-2 focus:ring-red-500/20 outline-none transition-all shadow-sm"
+                  placeholder="Enter secure access password..."
+                  autoFocus
+                />
+                {deleteError && <p className="text-red-500 text-xs font-semibold mt-2">{deleteError}</p>}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-8">
+              <button
+                onClick={() => setDeleteModalOpen(false)}
+                disabled={isDeleting}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold transition hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteSelected}
+                disabled={!deletePassword || isDeleting}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold transition bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 shadow-sm flex items-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  'Authorize Deletion'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

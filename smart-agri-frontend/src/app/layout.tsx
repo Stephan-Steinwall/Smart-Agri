@@ -4,6 +4,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import DashboardLayout from "@/components/DashboardLayout";
 import Providers from "@/components/Providers";
+import { Toaster } from "sonner";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <DashboardLayout>
             {children}
           </DashboardLayout>
+          <Toaster richColors position="top-right" />
         </Providers>
       </body>
     </html>

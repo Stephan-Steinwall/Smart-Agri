@@ -45,6 +45,26 @@ export class AlertsService {
     return data;
   }
 
+  async markAllRead(deviceId?: string) {
+    let query = this.supabaseService
+      .getClient()
+      .from('system_alerts')
+      .update({ read_at: new Date().toISOString() })
+      .is('read_at', null);
+
+    if (deviceId) {
+      query = query.eq('device_id', deviceId);
+    }
+
+    const { data, error } = await query.select();
+
+    if (error) {
+      this.logger.error(`Error marking all alerts as read: ${error.message}`);
+      throw new Error(error.message);
+    }
+    return data;
+  }
+
   async create(deviceId: string, severity: AlertSeverity, message: string) {
     const { error } = await this.supabaseService
       .getClient()
