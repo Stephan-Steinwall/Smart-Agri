@@ -23,15 +23,17 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 const DEVICE_ID = 'esp32_weather_01';
 
-// Auto-fit bounds component
-function FitBounds({ markers }: { markers: any[] }) {
+// Auto-fit bounds to the full drone orthomosaic bounds
+function FitBounds() {
   const map = useMap();
   useEffect(() => {
-    if (markers.length > 0) {
-      const bounds = L.latLngBounds(markers.map((m) => [m.latitude, m.longitude]));
-      map.fitBounds(bounds, { padding: [50, 50] });
-    }
-  }, [markers, map]);
+    // The exact bounding box of the generated XYZ tiles
+    const bounds = L.latLngBounds(
+      [7.093397, 80.404815], // SouthWest corner
+      [7.095782, 80.407905]  // NorthEast corner
+    );
+    map.fitBounds(bounds, { padding: [10, 10] });
+  }, [map]);
   return null;
 }
 
@@ -104,6 +106,7 @@ export default function FarmMapClient() {
       <MapContainer
         center={mapCenter}
         zoom={validMarkers.length > 0 ? 18 : 7}
+        maxZoom={20}
         className="w-full h-full z-0 flex-1"
         scrollWheelZoom={true}
       >
@@ -183,7 +186,7 @@ export default function FarmMapClient() {
             </Popup>
           </Marker>
         ))}
-        {validMarkers.length > 0 && <FitBounds markers={validMarkers} />}
+        <FitBounds />
       </MapContainer>
     </div>
   );

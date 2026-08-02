@@ -223,8 +223,8 @@ export class TelemetryService {
     return (data || [])
       .map((row, index) => {
         // Pseudo-random offset based on index so markers spread over the map
-        const latOffset = (index % 5 - 2) * 0.0001;
-        const lngOffset = ((index * 3) % 5 - 2) * 0.0001;
+        const latOffset = (index % 5 - 2) * 0.0005;
+        const lngOffset = ((index * 3) % 5 - 2) * 0.0005;
         
         return {
           id: row.id,
