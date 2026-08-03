@@ -805,7 +805,7 @@ export default function SoilAnalysisPage() {
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Recent Sensor Readings</h2>
             <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
-              Live continuous telemetry from the soil_sensor_readings database table.
+              Live continuous telemetry from the latest_soil_reading database table.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

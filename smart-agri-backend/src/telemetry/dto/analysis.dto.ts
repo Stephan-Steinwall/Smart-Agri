@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsNumber,
   IsObject,
   IsOptional,
@@ -47,6 +48,14 @@ export class SaveAnalysisDto {
   @IsOptional() @IsNumber() salinity?: number;
   @IsOptional() @IsNumber() prediction_confidence?: number;
   @IsOptional() @IsNumber() predictionConfidence?: number;
+
+  @IsOptional() @IsNumber() latitude?: number;
+  @IsOptional() @IsNumber() longitude?: number;
+  @IsOptional() @IsNumber() gps_altitude_m?: number;
+  @IsOptional() @IsNumber() gps_satellites?: number;
+  @IsOptional() @IsNumber() gps_hdop?: number;
+  @IsOptional() @IsBoolean() gps_valid?: boolean;
+  @IsOptional() @IsBoolean() gps_quality_acceptable?: boolean;
 
   @IsOptional()
   @IsObject()

@@ -153,6 +153,13 @@ export class TelemetryService {
       receiverUptimeMinutes: row.receiver_uptime_minutes ?? null,
       receiverUptimeSeconds: row.receiver_uptime_seconds ?? null,
       soilHealthScore: this.calculateSoilHealthScore(row),
+      latitude: row.latitude ?? null,
+      longitude: row.longitude ?? null,
+      gpsAltitudeM: row.gps_altitude_m ?? null,
+      gpsSatellites: row.gps_satellites ?? null,
+      gpsHdop: row.gps_hdop ?? null,
+      gpsValid: row.gps_valid ?? null,
+      gpsQualityAcceptable: row.gps_quality_acceptable ?? null,
     };
   }
 
@@ -162,10 +169,9 @@ export class TelemetryService {
 
     // 1. Check latest telemetry safely without .single()
     const { data: readingData } = await db
-      .from('soil_sensor_readings')
+      .from('latest_soil_reading')
       .select('soil_moisture_percent')
       .eq('device_id', deviceId)
-      .order('created_at', { ascending: false })
       .limit(1);
     
     const reading = readingData?.[0] || null;
@@ -199,10 +205,9 @@ export class TelemetryService {
   async getLatestReading(deviceId: string): Promise<SensorReading | null> {
     const { data, error } = await this.supabaseService
       .getClient()
-      .from('soil_sensor_readings')
+      .from('latest_soil_reading')
       .select('*')
       .eq('device_id', deviceId)
-      .order('created_at', { ascending: false })
       .limit(1);
 
     if (error) {
@@ -243,15 +248,14 @@ export class TelemetryService {
     ).reverse();
   }
 
-  // Get data specifically for the new dashboard from soil_sensor_readings table
+  // Get data specifically for the new dashboard from soil_readings table
   async getDashboardHistory(deviceId: string): Promise<any[]> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('soil_sensor_readings')
       .select('*')
       .eq('device_id', deviceId)
-      .order('created_at', { ascending: false })
-      .limit(50);
+      .order('created_at', { ascending: false });
 
     if (error) {
       if (error.code !== 'PGRST116') {
@@ -264,27 +268,23 @@ export class TelemetryService {
 
     // Map to the existing frontend structure so we don't break the UI
     return (data || [])
-      .map((row, index) => {
-        // Pseudo-random offset based on index so markers spread over the map
-        const latOffset = (index % 5 - 2) * 0.0005;
-        const lngOffset = ((index * 3) % 5 - 2) * 0.0005;
-        
+      .map((row) => {
         return {
           id: row.id,
           device_id: row.device_id,
-          moisture: row.soil_moisture_percent,
-          temperature: row.soil_temperature_celsius,
-          ph: row.soil_ph,
-          electricalConductivity: row.conductivity,
-          nitrogen: row.nitrogen,
-          phosphorus: row.phosphorus,
-          potassium: row.potassium,
-          tds: row.tds_mg_l,
-          salinity: row.salinity,
-          time: row.created_at,
-          latitude: (Number(process.env.FARM_LATITUDE) || 6.9271) + latOffset,
-          longitude: (Number(process.env.FARM_LONGITUDE) || 79.8612) + lngOffset,
-          gps_satellites: 8,
+          moisture: row.soil_moisture_percent ?? row.moisture ?? row.soil_moisture ?? null,
+          temperature: row.soil_temperature_celsius ?? row.temperature ?? row.soil_temperature ?? null,
+          ph: row.soil_ph ?? row.ph ?? null,
+          electricalConductivity: row.conductivity ?? row.ec_levels ?? row.electrical_conductivity ?? row.soil_conductivity ?? null,
+          nitrogen: row.nitrogen ?? null,
+          phosphorus: row.phosphorus ?? null,
+          potassium: row.potassium ?? null,
+          tds: row.tds_mg_l ?? row.tds ?? null,
+          salinity: row.salinity ?? null,
+          time: row.created_at ?? row.timestamp ?? row.time,
+          latitude: row.latitude ?? Number(process.env.FARM_LATITUDE) ?? 6.9271,
+          longitude: row.longitude ?? Number(process.env.FARM_LONGITUDE) ?? 79.8612,
+          gps_satellites: row.gps_satellites ?? 8,
         };
       })
       .reverse();
@@ -386,6 +386,13 @@ export class TelemetryService {
         labelled_by: payload.labelled_by ?? payload.labelledBy ?? null,
         verified_by: payload.verified_by ?? payload.verifiedBy ?? null,
         verified_at: payload.verified_at ?? payload.verifiedAt ?? null,
+        latitude: payload.latitude ?? null,
+        longitude: payload.longitude ?? null,
+        gps_altitude_m: payload.gps_altitude_m ?? null,
+        gps_satellites: payload.gps_satellites ?? null,
+        gps_hdop: payload.gps_hdop ?? null,
+        gps_valid: payload.gps_valid ?? false,
+        gps_quality_acceptable: payload.gps_quality_acceptable ?? false,
       };
 
       // Table name contains spaces; supply the exact table name (Supabase client quotes internally)

@@ -25,22 +25,22 @@ export class AutomationService {
 
     try {
       // 1. Get latest readings
-      const { data: latestReading, error: readingsError } =
+      const { data: readingData, error: readingsError } =
         await this.supabaseService
           .getClient()
           .from('soil_sensor_readings')
-          .select('soil_moisture_percent, nitrogen, phosphorus, potassium')
+          .select('*')
           .eq('device_id', deviceId)
           .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .limit(1);
 
-      if (readingsError || !latestReading) return;
+      if (readingsError || !readingData || readingData.length === 0) return;
+      const latestReading = readingData[0];
 
-      const moisture = latestReading.soil_moisture_percent;
-      const nitrogen = latestReading.nitrogen;
-      const phosphorus = latestReading.phosphorus;
-      const potassium = latestReading.potassium;
+      const moisture = latestReading.soil_moisture_percent ?? latestReading.moisture ?? latestReading.soil_moisture ?? 0;
+      const nitrogen = latestReading.nitrogen ?? 0;
+      const phosphorus = latestReading.phosphorus ?? 0;
+      const potassium = latestReading.potassium ?? 0;
 
       // 2. Get rain prediction
       const { data: rainData } = await this.supabaseService

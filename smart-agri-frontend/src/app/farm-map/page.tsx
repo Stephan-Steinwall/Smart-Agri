@@ -42,6 +42,8 @@ interface SavedAnalysis {
     salinity: number | string;
   };
   cropRecommendation: string;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export default function FarmMapPage() {
@@ -54,7 +56,8 @@ export default function FarmMapPage() {
   const [deleteError, setDeleteError] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [activeAction, setActiveAction] = useState('Drone Orthomosaic Active');
-  const [mapLayer, setMapLayer] = useState<'drone' | 'osm'>('drone');
+  const [mapLayer, setMapLayer] = useState<'drone' | 'satellite'>('drone');
+  const [focusedLocations, setFocusedLocations] = useState<{ lat: number; lng: number; label: string }[]>([]);
 
   // Load saved analyses on mount
   useEffect(() => {
@@ -84,6 +87,8 @@ export default function FarmMapPage() {
               salinity: row.salinity,
             },
             cropRecommendation: row.recommended_crop || 'Pending evaluation',
+            latitude: row.latitude ?? null,
+            longitude: row.longitude ?? null,
           }));
           setSavedAnalyses(mapped);
           window.localStorage.setItem('smart-agri-saved-analyses', JSON.stringify(mapped));
@@ -308,7 +313,7 @@ export default function FarmMapPage() {
       
       {/* Map Container */}
       <div className="flex-1 w-full min-h-[60vh] relative z-0 flex flex-col bg-slate-100 dark:bg-slate-900 rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all hover:shadow-[0_8px_40px_rgb(0,0,0,0.08)]">
-        <FarmMapClient mapLayer={mapLayer} />
+        <FarmMapClient mapLayer={mapLayer} focusedLocations={focusedLocations} />
         <div className="absolute bottom-6 left-6 z-[400] bg-white/60 dark:bg-slate-900/60 backdrop-blur-md px-4 py-2 rounded-2xl shadow-lg border border-white/40 dark:border-slate-700/50 pointer-events-none">
           <p className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-widest opacity-80">Interactive Map View</p>
         </div>
@@ -323,8 +328,8 @@ export default function FarmMapPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <button 
             onClick={() => {
-              setActiveAction(mapLayer === 'drone' ? 'OpenStreetMap Active' : 'Drone Orthomosaic Active');
-              setMapLayer(prev => prev === 'drone' ? 'osm' : 'drone');
+              setActiveAction(mapLayer === 'drone' ? 'Satellite View Active' : 'Drone Orthomosaic Active');
+              setMapLayer(prev => prev === 'drone' ? 'satellite' : 'drone');
             }}
             className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800/50 dark:hover:bg-indigo-900/30 border border-slate-100 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-800 transition-all group text-left"
           >
@@ -349,15 +354,24 @@ export default function FarmMapPage() {
             </div>
           </button>
           <button 
-            onClick={() => setActiveAction('Load Sample Locations Active')}
+            onClick={() => {
+              setActiveAction('Load Sample Locations Active');
+              if (selectedIds.length > 0) {
+                const locations = selectedIds
+                  .map(id => savedAnalyses.find(s => s.id === id))
+                  .filter(s => s && s.latitude != null && s.longitude != null)
+                  .map(s => ({ lat: s!.latitude!, lng: s!.longitude!, label: s!.label }));
+                setFocusedLocations(locations);
+              }
+            }}
             className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50 hover:bg-blue-50 dark:bg-slate-800/50 dark:hover:bg-blue-900/30 border border-slate-100 dark:border-slate-700 hover:border-blue-200 dark:hover:border-blue-800 transition-all group text-left"
           >
             <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
               <MapPin className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm font-bold text-slate-800 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">Load Sample Locations</p>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">View history on map</p>
+              <p className="text-sm font-bold text-slate-800 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">Load Sample Location</p>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">Show selected on map</p>
             </div>
           </button>
         </div>
@@ -420,6 +434,7 @@ export default function FarmMapPage() {
                   <th className="px-4 py-4 font-bold border-b border-slate-200 dark:border-slate-800">Moisture</th>
                   <th className="px-4 py-4 font-bold border-b border-slate-200 dark:border-slate-800">pH Level</th>
                   <th className="px-4 py-4 font-bold border-b border-slate-200 dark:border-slate-800">NPK</th>
+                  <th className="px-4 py-4 font-bold border-b border-slate-200 dark:border-slate-800">GPS</th>
                   <th className="px-4 py-4 font-bold border-b border-slate-200 dark:border-slate-800">Recommendation</th>
                 </tr>
               </thead>
@@ -471,6 +486,11 @@ export default function FarmMapPage() {
                           <div className="w-px h-6 bg-slate-200 dark:bg-slate-700"></div>
                           <div className="flex flex-col text-slate-400 font-bold"><span className="text-[9px] uppercase leading-none">K</span> <span className="text-slate-700 dark:text-slate-300">{formatMetricValue(item.soilMetrics.potassium)}</span></div>
                         </div>
+                      </td>
+                      <td className="px-4 py-4 text-slate-500 dark:text-slate-400 text-xs font-medium whitespace-nowrap">
+                        {item.latitude != null && item.longitude != null 
+                          ? `${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}`
+                          : '—'}
                       </td>
                       <td className="px-4 py-4">
                         <span className="font-semibold text-slate-700 dark:text-slate-200 line-clamp-2 leading-tight">

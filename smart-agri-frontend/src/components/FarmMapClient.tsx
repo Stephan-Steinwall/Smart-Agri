@@ -37,6 +37,21 @@ function FitBounds() {
   return null;
 }
 
+function FocusMap({ locations }: { locations?: { lat: number; lng: number }[] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (locations && locations.length > 0) {
+      if (locations.length === 1) {
+        map.flyTo([locations[0].lat, locations[0].lng], 22, { animate: true, duration: 1.5 });
+      } else {
+        const bounds = L.latLngBounds(locations.map(loc => [loc.lat, loc.lng]));
+        map.flyToBounds(bounds, { padding: [50, 50], maxZoom: 22, animate: true, duration: 1.5 });
+      }
+    }
+  }, [locations, map]);
+  return null;
+}
+
 export type SoilReading = {
   id: string;
   device_id: string;
@@ -52,7 +67,13 @@ export type SoilReading = {
   time: string;
 };
 
-export default function FarmMapClient({ mapLayer = 'drone' }: { mapLayer?: 'drone' | 'osm' }) {
+export default function FarmMapClient({ 
+  mapLayer = 'drone',
+  focusedLocations
+}: { 
+  mapLayer?: 'drone' | 'satellite';
+  focusedLocations?: { lat: number; lng: number; label: string }[];
+}) {
   const { data: history, isLoading, isError } = useQuery<SoilReading[]>({
     queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID],
     queryFn: async () => {
@@ -97,30 +118,26 @@ export default function FarmMapClient({ mapLayer = 'drone' }: { mapLayer?: 'dron
 
   return (
     <div className="w-full h-full min-h-[500px] flex flex-col relative z-0">
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[400] bg-white/90 dark:bg-slate-900/90 backdrop-blur px-4 py-2 rounded-full shadow-lg border border-slate-200 dark:border-slate-700 pointer-events-none">
-        <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-          {validMarkers.length} Soil Samples Found
-        </span>
-      </div>
-
       <MapContainer
         center={mapCenter}
         zoom={validMarkers.length > 0 ? 18 : 7}
-        maxZoom={20}
+        maxZoom={24}
         className="w-full h-full z-0 flex-1"
         scrollWheelZoom={true}
       >
-        {mapLayer === 'osm' && (
+        {mapLayer === 'satellite' && (
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; Google'
+            url="http://mt0.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}"
+            maxNativeZoom={20}
+            maxZoom={24}
           />
         )}
         {mapLayer === 'drone' && (
           <TileLayer
             url="/farm_tiles/{z}/{x}/{y}.png"
             minZoom={14}
-            maxZoom={20}
+            maxZoom={24}
             maxNativeZoom={20}
             noWrap={true}
           />
@@ -184,7 +201,20 @@ export default function FarmMapClient({ mapLayer = 'drone' }: { mapLayer?: 'dron
             </Popup>
           </Marker>
         ))}
+        {focusedLocations && focusedLocations.map((loc, idx) => (
+          <Marker key={`focused-${idx}`} position={[loc.lat, loc.lng]}>
+            <Popup className="rounded-xl overflow-hidden shadow-lg border-0">
+              <div className="p-2 text-center">
+                <h3 className="font-bold text-slate-800 text-sm mb-1">{loc.label || 'Selected Sample'}</h3>
+                <p className="text-xs text-slate-500">
+                  {loc.lat.toFixed(6)}, {loc.lng.toFixed(6)}
+                </p>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
         <FitBounds />
+        <FocusMap locations={focusedLocations} />
       </MapContainer>
     </div>
   );
