@@ -254,13 +254,17 @@ export default function AccountManagement() {
     const fullPhone = `${countryCode}${cleanDigits}`;
 
     try {
-      const res = await apiClient.post('/telemetry/auth/update-account', {
+      const payload: any = {
         oldEmail: originalEmail,
         email: email.trim(),
         username: username.trim(),
         phone: fullPhone,
         twoFactorEnabled: twoFactor,
-      });
+      };
+      if (showAccountPassword && newAccountPassword) {
+        payload.newPassword = newAccountPassword;
+      }
+      const res = await apiClient.post('/telemetry/auth/update-account', payload);
 
       if (res.data && res.data.success) {
         if (typeof window !== 'undefined') {
@@ -274,7 +278,14 @@ export default function AccountManagement() {
           localStorage.setItem('userAccount', JSON.stringify(updatedUser));
         }
         setOriginalEmail(email.trim());
-        setSaveMessage('✓ Account & phone number updated successfully in user_accounts!');
+        if (showAccountPassword) {
+          setSaveMessage('✓ Account, phone number & password updated successfully!');
+          setNewAccountPassword('');
+          setConfirmAccountPassword('');
+          setShowAccountPassword(false);
+        } else {
+          setSaveMessage('✓ Account & phone number updated successfully!');
+        }
         setIsSaving(false);
         setTimeout(() => setSaveMessage(''), 4000);
         return;

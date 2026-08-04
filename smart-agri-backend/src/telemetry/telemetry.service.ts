@@ -1123,6 +1123,7 @@ export class TelemetryService {
     username?: string;
     phone?: string;
     twoFactorEnabled?: boolean;
+    newPassword?: string;
   }) {
     this.logger.log(
       `[AUTH SERVICE] Updating user account for ${body.oldEmail || body.email || body.username}`,
@@ -1195,6 +1196,9 @@ export class TelemetryService {
         ) {
           updatePayload.phone = finalPhone;
         }
+      }
+      if (body.newPassword) {
+        updatePayload.password_hash = await bcrypt.hash(body.newPassword, 10);
       }
       if ('updated_at' in target)
         updatePayload.updated_at = new Date().toISOString();

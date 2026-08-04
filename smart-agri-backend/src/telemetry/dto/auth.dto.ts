@@ -64,6 +64,10 @@ export class UpdateAccountDto {
   @IsOptional()
   @IsBoolean()
   twoFactorEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  newPassword?: string;
 }
 
 export class VerifySystemControlDto {
