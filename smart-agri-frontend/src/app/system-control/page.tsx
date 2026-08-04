@@ -168,7 +168,19 @@ export default function SystemControlPage() {
     setIsGeneratingPreset(true);
     try {
       const res = await apiClient.get(`/ai/crop-thresholds/${cropName}`);
-      setThresholds(res.data);
+      const d = res.data || {};
+      setThresholds({
+        moisture_threshold_low: d.moisture_threshold_low ?? 20,
+        moisture_threshold_high: d.moisture_threshold_high ?? 50,
+        nitrogen_threshold_low: d.nitrogen_threshold_low ?? 30,
+        nitrogen_threshold_high: d.nitrogen_threshold_high ?? 70,
+        phosphorus_threshold_low: d.phosphorus_threshold_low ?? 30,
+        phosphorus_threshold_high: d.phosphorus_threshold_high ?? 70,
+        potassium_threshold_low: d.potassium_threshold_low ?? 30,
+        potassium_threshold_high: d.potassium_threshold_high ?? 70,
+        light_intensity_threshold_lux: d.light_intensity_threshold_lux ?? 5000,
+        humidity_threshold_percent: d.humidity_threshold_percent ?? 45,
+      });
     } catch (e: any) {
       console.error("Failed to fetch crop thresholds", e);
       toast.error("Failed to fetch AI thresholds for this crop.");
@@ -361,7 +373,12 @@ export default function SystemControlPage() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [pumps]);
+    // handlePumpToggle is only ever called here with forcedState=false, which
+    // never reads `pumps` (it skips straight to newState=false), so this
+    // interval doesn't need to be torn down and rebuilt every time the
+    // 3s switchData poll produces a new `pumps` object reference.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const getDbName = (key: string) => {
     if (key.startsWith('light_')) return key;
@@ -485,10 +502,13 @@ export default function SystemControlPage() {
       // to also write straight to Supabase with the public anon key as an
       // "optimistic" pre-write, which meant anyone with that key (it ships in
       // every page load) could flip switches without logging in at all.
-      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
+      const res = await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
         pumpName: 'system_switch',
         state: newState
       });
+      if (res.data?.success === false) {
+        throw new Error(res.data?.message || 'Database did not confirm the change.');
+      }
       refetchLogs();
     } catch (e) {
       console.error('Failed to toggle system switch', e);
@@ -512,7 +532,7 @@ export default function SystemControlPage() {
     setActiveTimers({});
 
     // Send stop signal for every pump to backend
-    const allPumps = ['pump_water', 'pump_nitrogen', 'pump_phosphorus', 'pump_potassium', 'light_01', 'light_02', 'system_switch'];
+    const allPumps = ['pump_water', 'pump_nitrogen', 'pump_phosphorus', 'pump_potassium', 'pump_mister', 'light_01', 'light_02', 'system_switch'];
     for (const p of allPumps) {
       try {
         await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
@@ -579,10 +599,13 @@ export default function SystemControlPage() {
 
     // Send control command via backend
     try {
-      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
+      const res = await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
         pumpName: dbName,
         state: newState
       });
+      if (res.data?.success === false) {
+        throw new Error(res.data?.message || 'Database did not confirm the change.');
+      }
       refetchLogs();
     } catch (e: any) {
       console.error(`Failed to toggle ${pumpKey}`, e);

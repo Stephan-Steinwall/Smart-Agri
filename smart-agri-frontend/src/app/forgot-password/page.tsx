@@ -6,15 +6,6 @@ import { ArrowRight, Lock, Mail, Key, ArrowLeft, CheckCircle2, RefreshCw, Smartp
 import Link from 'next/link';
 import { apiClient } from '@/lib/api';
 
-const maskPhone = (phone: string) => {
-  if (!phone) return '•••• ••• ••••';
-  const clean = String(phone).trim();
-  if (clean.length <= 4) return '••••';
-  const last4 = clean.slice(-4);
-  const start = clean.startsWith('+') ? clean.slice(0, 3) : '';
-  return `${start} ••• ••• ${last4}`.trim();
-};
-
 export default function ForgotPasswordPage() {
   const router = useRouter();
 
@@ -28,7 +19,7 @@ export default function ForgotPasswordPage() {
   const [otpCode, setOtpCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [pendingUser, setPendingUser] = useState<any>(null);
+  const [maskedPhone, setMaskedPhone] = useState('');
   const [resendTimer, setResendTimer] = useState(0);
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -46,8 +37,8 @@ export default function ForgotPasswordPage() {
         emailOrUsername: identifier.trim(),
       });
 
-      if (res.data && res.data.success && res.data.user) {
-        setPendingUser(res.data.user);
+      if (res.data && res.data.success) {
+        setMaskedPhone(res.data.maskedPhone || '');
         setOtpCode('');
         setNewPassword('');
         setConfirmPassword('');
@@ -72,8 +63,8 @@ export default function ForgotPasswordPage() {
     setError('');
     setSuccessMsg('');
 
-    if (newPassword.length < 6) {
-      setError('New password must be at least 6 characters.');
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -84,9 +75,8 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
-      const targetIdentifier = pendingUser?.email || pendingUser?.username || identifier;
       const res = await apiClient.post('/telemetry/auth/reset-password', {
-        emailOrUsername: targetIdentifier,
+        emailOrUsername: identifier.trim(),
         code: otpCode.trim(),
         newPassword,
       });
@@ -121,13 +111,12 @@ export default function ForgotPasswordPage() {
     }, 1000);
 
     try {
-      const targetIdentifier = pendingUser?.email || pendingUser?.username || identifier;
       const res = await apiClient.post('/telemetry/auth/forgot-password', {
-        emailOrUsername: targetIdentifier,
+        emailOrUsername: identifier.trim(),
       });
 
       if (res.data && res.data.success) {
-        setPendingUser(res.data.user);
+        if (res.data.maskedPhone) setMaskedPhone(res.data.maskedPhone);
         setSuccessMsg(res.data.message || 'New code sent to WhatsApp / SMS!');
       } else {
         setError(res.data?.message || 'Failed to resend code.');
@@ -215,7 +204,7 @@ export default function ForgotPasswordPage() {
               </div>
               <h1 className="text-2xl font-bold text-white tracking-tight">Enter Reset Code</h1>
               <p className="text-sm text-slate-300 mt-2 text-center">
-                We dispatched a WhatsApp / SMS security code to your registered mobile phone: <strong className="text-green-400 font-medium block mt-0.5">{maskPhone(pendingUser?.phone || pendingUser?.phone_number || '+1 (555) 382-9102')}</strong>
+                We dispatched a WhatsApp / SMS security code to your registered mobile phone: <strong className="text-green-400 font-medium block mt-0.5">{maskedPhone || '•••• ••• ••••'}</strong>
               </p>
             </div>
 
@@ -224,7 +213,7 @@ export default function ForgotPasswordPage() {
               <div className="flex flex-wrap items-center justify-between gap-1 text-xs text-slate-400 border-b border-white/10 pb-2">
                 <div className="flex items-center gap-1.5 text-green-400 font-semibold uppercase tracking-wider text-[11px]">
                   <MessageSquare className="w-3.5 h-3.5" />
-                  <span>WHATSAPP & SMS • JUST NOW ({maskPhone(pendingUser?.phone || pendingUser?.phone_number || '+1 (555) 382-9102')})</span>
+                  <span>WHATSAPP & SMS • JUST NOW ({maskedPhone || '•••• ••• ••••'})</span>
                 </div>
                 <span className="text-[10px] bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full font-medium">Delivered</span>
               </div>

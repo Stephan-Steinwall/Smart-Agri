@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { SensorReading } from './entities/sensor-reading.entity';
@@ -25,6 +26,25 @@ export class TelemetryService {
     private readonly supabaseService: SupabaseService,
     private readonly jwtService: JwtService,
   ) {}
+
+  // These session maps have no other cleanup path — an abandoned login OTP,
+  // an abandoned password reset, or an expired lockout otherwise stays in
+  // memory for the lifetime of the process. Sweep expired entries on a
+  // timer so long-running deployments don't grow this unbounded.
+  @Interval(10 * 60 * 1000)
+  private sweepExpiredSessions() {
+    const now = Date.now();
+    for (const [key, session] of this.otpSessions) {
+      if (now > session.expiresAt) this.otpSessions.delete(key);
+    }
+    for (const [key, session] of this.passwordResetSessions) {
+      if (now > session.expiresAt) this.passwordResetSessions.delete(key);
+    }
+    for (const [key, record] of this.loginAttempts) {
+      if (record.lockedUntil > 0 && record.lockedUntil < now)
+        this.loginAttempts.delete(key);
+    }
+  }
 
   private isBcryptHash(value: string): boolean {
     return /^\$2[aby]\$/.test(value);
@@ -65,6 +85,17 @@ export class TelemetryService {
     }
 
     return true;
+  }
+
+  // Masks a phone number for client display without ever sending the raw
+  // digits over the wire (mirrors the frontend's cosmetic maskPhone()).
+  private maskPhoneForResponse(phone: string): string {
+    if (!phone) return '•••• ••• ••••';
+    const clean = String(phone).trim();
+    if (clean.length <= 4) return '••••';
+    const last4 = clean.slice(-4);
+    const start = clean.startsWith('+') ? clean.slice(0, 3) : '';
+    return `${start} ••• ••• ${last4}`.trim();
   }
 
   private clampScore(value: number): number {
@@ -172,27 +203,42 @@ export class TelemetryService {
     const db = this.supabaseService.getClient();
 
     // 1. Check latest telemetry safely without .single()
-    const { data: readingData } = await db
+    const { data: readingData, error: readingError } = await db
       .from('latest_soil_reading')
       .select('soil_moisture_percent')
       .eq('device_id', deviceId)
       .limit(1);
-    
+    if (readingError) {
+      this.logger.warn(
+        `getRainDeferralStatus: failed to fetch latest_soil_reading for ${deviceId}: ${readingError.message}`,
+      );
+    }
+
     const reading = readingData?.[0] || null;
 
     // 2. Check system switches
-    const { data: switches } = await db
+    const { data: switches, error: switchesError } = await db
       .from('system_switches')
       .select('moisture_threshold_low, pump_water')
       .eq('device_id', deviceId)
       .single();
+    if (switchesError && switchesError.code !== 'PGRST116') {
+      this.logger.warn(
+        `getRainDeferralStatus: failed to fetch system_switches for ${deviceId}: ${switchesError.message}`,
+      );
+    }
 
     // 3. Check rain prediction
-    const { data: prediction } = await db
+    const { data: prediction, error: predictionError } = await db
       .from('rain_predictions')
       .select('will_rain')
       .eq('device_id', deviceId)
       .single();
+    if (predictionError && predictionError.code !== 'PGRST116') {
+      this.logger.warn(
+        `getRainDeferralStatus: failed to fetch rain_predictions for ${deviceId}: ${predictionError.message}`,
+      );
+    }
 
     const moisture = reading?.soil_moisture_percent ?? 0;
     const threshold = switches?.moisture_threshold_low ?? 0;
@@ -286,8 +332,8 @@ export class TelemetryService {
           tds: row.tds_mg_l ?? row.tds ?? null,
           salinity: row.salinity ?? null,
           time: row.created_at ?? row.timestamp ?? row.time,
-          latitude: row.latitude ?? Number(process.env.FARM_LATITUDE) ?? 6.9271,
-          longitude: row.longitude ?? Number(process.env.FARM_LONGITUDE) ?? 79.8612,
+          latitude: row.latitude ?? (Number(process.env.FARM_LATITUDE) || 6.9271),
+          longitude: row.longitude ?? (Number(process.env.FARM_LONGITUDE) || 79.8612),
           gps_satellites: row.gps_satellites ?? 8,
         };
       })
@@ -629,6 +675,8 @@ export class TelemetryService {
       .eq('device_id', deviceId)
       .select();
 
+    let persisted = !updateError && !!updateData && updateData.length > 0;
+
     if (updateError) {
       this.logger.error(`Error updating pump switch: ${updateError.message}`);
     } else if (!updateData || updateData.length === 0) {
@@ -645,7 +693,18 @@ export class TelemetryService {
         this.logger.error(
           `Error inserting pump switch: ${insertError.message}`,
         );
+      } else {
+        persisted = true;
       }
+    }
+
+    if (!persisted) {
+      return {
+        success: false,
+        pumpName,
+        state,
+        message: 'Failed to update system switch in the database.',
+      };
     }
 
     // --- pump_activation_logs Logic ---
@@ -655,18 +714,32 @@ export class TelemetryService {
         const client = this.supabaseService.getClient();
 
         if (state === true) {
-          // Start a new session
-          const { error: logError } = await client
+          // Only start a new session if one isn't already running for this
+          // pump — otherwise a duplicate "on" call (double-click, retry)
+          // leaves an orphaned running row with no end_time once the pump
+          // is eventually turned off (only the newest running row gets closed).
+          const { data: alreadyRunning } = await client
             .from('pump_activation_logs')
-            .insert({
-              session_id: randomUUID(),
-              device_id: deviceId,
-              pump_name: purePumpName,
-              start_time: new Date().toISOString(),
-              status: 'running',
-            });
-          if (logError)
-            this.logger.error(`Error starting pump log: ${logError.message}`);
+            .select('session_id')
+            .eq('device_id', deviceId)
+            .eq('pump_name', purePumpName)
+            .eq('status', 'running')
+            .limit(1)
+            .maybeSingle();
+
+          if (!alreadyRunning) {
+            const { error: logError } = await client
+              .from('pump_activation_logs')
+              .insert({
+                session_id: randomUUID(),
+                device_id: deviceId,
+                pump_name: purePumpName,
+                start_time: new Date().toISOString(),
+                status: 'running',
+              });
+            if (logError)
+              this.logger.error(`Error starting pump log: ${logError.message}`);
+          }
         } else {
           // Stop the currently running session
           const { data: runningSession, error: fetchError } = await client
@@ -712,6 +785,26 @@ export class TelemetryService {
   }
 
   async updateThresholds(deviceId: string, body: any) {
+    // A low threshold >= its high threshold makes the automation's ON
+    // (value < low) and OFF (value >= high) conditions simultaneously
+    // satisfiable, causing the pump/output to flap on every poll.
+    const thresholdPairs: [string, string][] = [
+      ['moisture_threshold_low', 'moisture_threshold_high'],
+      ['nitrogen_threshold_low', 'nitrogen_threshold_high'],
+      ['phosphorus_threshold_low', 'phosphorus_threshold_high'],
+      ['potassium_threshold_low', 'potassium_threshold_high'],
+    ];
+    for (const [lowKey, highKey] of thresholdPairs) {
+      const low = body[lowKey];
+      const high = body[highKey];
+      if (typeof low === 'number' && typeof high === 'number' && low >= high) {
+        return {
+          success: false,
+          message: `${lowKey.replace('_threshold_low', '')} low threshold (${low}) must be less than its high threshold (${high}).`,
+        };
+      }
+    }
+
     const { data: updateData, error: updateError } = await this.supabaseService
       .getClient()
       .from('system_switches')
@@ -804,35 +897,42 @@ export class TelemetryService {
       const matchVal =
         matchedUser.id ?? matchedUser.email ?? matchedUser.username;
 
-      if (password && dbPassword) {
-        const passwordOk = await this.verifyAndMaybeMigratePassword(
-          password,
-          String(dbPassword),
-          matchCol,
-          matchVal,
-          'user_password_hash',
-        );
+      // `password` is optional in the DTO so a missing/empty value produces
+      // this same "invalid password" response instead of a generic 400 —
+      // but it must NEVER be treated as "skip verification." Omitting it
+      // must not authenticate an account, including :NO_2FA accounts that
+      // otherwise get an instant JWT below.
+      const passwordOk = password
+        ? dbPassword
+          ? await this.verifyAndMaybeMigratePassword(
+              password,
+              String(dbPassword),
+              matchCol,
+              matchVal,
+              'user_password_hash',
+            )
+          : false
+        : false;
 
-        if (!passwordOk) {
-          // Record failed attempt
-          const count = (attemptRecord?.count || 0) + 1;
-          if (count >= 5) {
-            this.loginAttempts.set(cleanInput, {
-              count,
-              lockedUntil: Date.now() + 15 * 60 * 1000,
-            });
-            return {
-              success: false,
-              message:
-                'Too many failed login attempts. Account locked for 15 minutes.',
-            };
-          } else {
-            this.loginAttempts.set(cleanInput, { count, lockedUntil: 0 });
-            return {
-              success: false,
-              message: `Invalid password. ${5 - count} attempt(s) remaining before lockout.`,
-            };
-          }
+      if (!passwordOk) {
+        // Record failed attempt
+        const count = (attemptRecord?.count || 0) + 1;
+        if (count >= 5) {
+          this.loginAttempts.set(cleanInput, {
+            count,
+            lockedUntil: Date.now() + 15 * 60 * 1000,
+          });
+          return {
+            success: false,
+            message:
+              'Too many failed login attempts. Account locked for 15 minutes.',
+          };
+        } else {
+          this.loginAttempts.set(cleanInput, { count, lockedUntil: 0 });
+          return {
+            success: false,
+            message: `Invalid password. ${5 - count} attempt(s) remaining before lockout.`,
+          };
         }
       }
 
@@ -1123,8 +1223,19 @@ export class TelemetryService {
   async forgotPassword(emailOrUsername: string) {
     if (!emailOrUsername)
       return { success: false, message: 'Email or username is required.' };
+
+    // Generic response used for every outcome that must not reveal whether
+    // an account exists or is disabled, to prevent account enumeration.
+    const genericMessage =
+      'If an account with that email or username exists, a verification code has been dispatched to the registered device.';
+
     try {
       const cleanInput = emailOrUsername.trim().toLowerCase();
+      // The session is always keyed by exactly what the caller submitted
+      // (not the account's canonical email) so subsequent verify/resend
+      // calls — which only ever have access to the masked response below,
+      // never the real email/username — can reliably find it again.
+      const sessionKey = cleanInput;
 
       const client = this.supabaseService.getClient();
       const { data: allUsers, error } = await client
@@ -1134,14 +1245,8 @@ export class TelemetryService {
         this.logger.warn(`Error querying user_accounts: ${error.message}`);
         return { success: false, message: `Database error: ${error.message}` };
       }
-      if (!allUsers || allUsers.length === 0) {
-        return {
-          success: false,
-          message: 'user_accounts table is empty or account not found.',
-        };
-      }
 
-      const matchedUser = allUsers.find((u) => {
+      const matchedUser = (allUsers || []).find((u) => {
         const emailMatch =
           u.email && String(u.email).trim().toLowerCase() === cleanInput;
         const userMatch =
@@ -1149,29 +1254,13 @@ export class TelemetryService {
         return emailMatch || userMatch;
       });
 
-      if (!matchedUser) {
-        return {
-          success: false,
-          message: 'Account not found in user_accounts table.',
-        };
-      }
-
-      if (matchedUser.account_status === 'disabled') {
-        return {
-          success: false,
-          message: 'This account has been disabled. Contact an administrator.',
-        };
+      // Neither "not found" nor "disabled" is disclosed to the caller —
+      // both look identical to a genuine success from the outside.
+      if (!matchedUser || matchedUser.account_status === 'disabled') {
+        return { success: true, message: genericMessage };
       }
 
       const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const sessionKey = (
-        matchedUser.email ||
-        matchedUser.username ||
-        cleanInput
-      )
-        .toString()
-        .toLowerCase()
-        .trim();
 
       this.passwordResetSessions.set(sessionKey, {
         code,
@@ -1194,12 +1283,8 @@ export class TelemetryService {
 
       return {
         success: true,
-        user: {
-          email: matchedUser.email,
-          username: matchedUser.username,
-          phone: cleanPhone,
-        },
-        message: 'A password reset code has been dispatched to your registered phone.',
+        message: genericMessage,
+        maskedPhone: this.maskPhoneForResponse(cleanPhone),
       };
     } catch (err: any) {
       this.logger.error(`Forgot password error: ${err.message}`);
@@ -1289,17 +1374,19 @@ export class TelemetryService {
     }
   }
 
-  async updateAccount(body: {
-    email?: string;
-    oldEmail?: string;
-    fullName?: string;
-    username?: string;
-    phone?: string;
-    twoFactorEnabled?: boolean;
-    newPassword?: string;
-  }) {
+  async updateAccount(
+    caller: { sub?: string | number; email?: string; username?: string },
+    body: {
+      email?: string;
+      fullName?: string;
+      username?: string;
+      phone?: string;
+      twoFactorEnabled?: boolean;
+      newPassword?: string;
+    },
+  ) {
     this.logger.log(
-      `[AUTH SERVICE] Updating user account for ${body.oldEmail || body.email || body.username}`,
+      `[AUTH SERVICE] Updating user account for ${caller.email || caller.username}`,
     );
     try {
       const client = this.supabaseService.getClient();
@@ -1313,32 +1400,27 @@ export class TelemetryService {
         };
       }
 
-      const cleanOld = body.oldEmail ? body.oldEmail.trim().toLowerCase() : '';
-      const cleanEmail = body.email ? body.email.trim().toLowerCase() : '';
-      const cleanUser = body.username ? body.username.trim().toLowerCase() : '';
+      // Resolve the target account strictly from the authenticated caller's
+      // verified JWT identity — never from attacker-suppliable body fields —
+      // so a valid session can only ever modify the account it belongs to.
+      const callerEmail = caller.email ? caller.email.trim().toLowerCase() : '';
+      const callerUsername = caller.username
+        ? caller.username.trim().toLowerCase()
+        : '';
 
-      let target = allUsers.find((u: any) => {
+      const target = allUsers.find((u: any) => {
         const uEmail = u.email ? String(u.email).trim().toLowerCase() : '';
         const uUser = u.username ? String(u.username).trim().toLowerCase() : '';
-        const uUserEmail = u.user_email
-          ? String(u.user_email).trim().toLowerCase()
-          : '';
         return (
-          (cleanOld && (uEmail === cleanOld || uUserEmail === cleanOld)) ||
-          (cleanEmail &&
-            (uEmail === cleanEmail || uUserEmail === cleanEmail)) ||
-          (cleanUser && uUser === cleanUser)
+          (callerEmail && uEmail === callerEmail) ||
+          (callerUsername && uUser === callerUsername)
         );
       });
-
-      if (!target && allUsers.length === 1) {
-        target = allUsers[0];
-      }
 
       if (!target) {
         return {
           success: false,
-          message: 'Matching user account not found in database.',
+          message: 'Authenticated account not found in database.',
         };
       }
 

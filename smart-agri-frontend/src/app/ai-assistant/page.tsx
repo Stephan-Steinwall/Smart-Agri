@@ -88,9 +88,14 @@ export default function AiAssistant() {
 
   useEffect(() => {
     if (!activeSessionId) return;
+    // Guards against a slower response for a session the user has already
+    // switched away from overwriting the (correct, already-loaded) messages
+    // for the session they're now viewing.
+    let cancelled = false;
     const fetchHistory = async () => {
       try {
         const res = await apiClient.get(`/ai/history/${activeSessionId}`);
+        if (cancelled) return;
         if (res.data && res.data.length > 0) {
           const loadedMessages: Message[] = res.data.map((row: any) => ({
             role: row.role === 'assistant' ? 'ai' : 'user',
@@ -108,6 +113,7 @@ export default function AiAssistant() {
           ]);
         }
       } catch (e) {
+        if (cancelled) return;
         // Backend offline fallback
         setMessages([
           {
@@ -119,6 +125,7 @@ export default function AiAssistant() {
       }
     };
     fetchHistory();
+    return () => { cancelled = true; };
   }, [activeSessionId]);
 
   useEffect(() => {

@@ -286,48 +286,16 @@ export default function AccountManagement() {
         } else {
           setSaveMessage('✓ Account & phone number updated successfully!');
         }
-        setIsSaving(false);
         setTimeout(() => setSaveMessage(''), 4000);
-        return;
+      } else {
+        setSaveMessage(`Error: ${res.data?.message || 'Failed to update account.'}`);
       }
-    } catch (err) {
-      console.warn("Backend update API failed, attempting direct Supabase update...", err);
+    } catch (err: any) {
+      console.error('Failed to update account', err);
+      setSaveMessage(`Error: ${err?.response?.data?.message || 'Failed to reach the server. Please try again.'}`);
+    } finally {
+      setIsSaving(false);
     }
-
-    try {
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (SUPABASE_URL && SUPABASE_KEY) {
-        const mod = await import('@supabase/supabase-js');
-        const supabase = mod.createClient(SUPABASE_URL, SUPABASE_KEY);
-        await supabase
-          .from('user_accounts')
-          .update({
-            username: username.trim(),
-            email: email.trim(),
-            phone: fullPhone,
-          })
-          .eq('email', originalEmail);
-      }
-    } catch (err) {}
-
-    if (typeof window !== 'undefined') {
-      const existing = localStorage.getItem('userAccount');
-      let parsed = {};
-      try { if (existing) parsed = JSON.parse(existing); } catch(e){}
-      const updated = {
-        ...parsed,
-        username: username.trim(),
-        email: email.trim(),
-        phone: fullPhone,
-        phone_number: fullPhone,
-      };
-      localStorage.setItem('userAccount', JSON.stringify(updated));
-    }
-    setOriginalEmail(email.trim());
-    setIsSaving(false);
-    setSaveMessage('✓ Settings & phone number saved successfully!');
-    setTimeout(() => setSaveMessage(''), 4000);
   };
 
   const handleLogout = () => {

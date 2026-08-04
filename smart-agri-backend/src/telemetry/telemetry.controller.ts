@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Post, Body, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
 import { TelemetryService } from './telemetry.service';
 import { AuthGuard } from '../auth/auth.guard';
 import {
@@ -170,8 +171,13 @@ export class TelemetryController {
 
   @UseGuards(AuthGuard)
   @Post('auth/update-account')
-  async updateAccount(@Body() body: UpdateAccountDto) {
-    return this.telemetryService.updateAccount(body);
+  async updateAccount(@Body() body: UpdateAccountDto, @Req() req: Request) {
+    const caller = (req as any).user as {
+      sub?: string | number;
+      email?: string;
+      username?: string;
+    };
+    return this.telemetryService.updateAccount(caller, body);
   }
 
   @UseGuards(AuthGuard)

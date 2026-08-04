@@ -56,7 +56,7 @@ export class ResetPasswordDto {
   code: string;
 
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   newPassword: string;
 }
 
@@ -64,10 +64,6 @@ export class UpdateAccountDto {
   @IsOptional()
   @IsString()
   email?: string;
-
-  @IsOptional()
-  @IsString()
-  oldEmail?: string;
 
   @IsOptional()
   @IsString()
@@ -87,6 +83,7 @@ export class UpdateAccountDto {
 
   @IsOptional()
   @IsString()
+  @MinLength(8)
   newPassword?: string;
 }
 

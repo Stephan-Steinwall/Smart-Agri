@@ -235,24 +235,35 @@ export default function SoilAnalysisPage() {
 
     let channel: any = null;
     let supabase: any = null;
+    // Guards against the component unmounting before the async setup below
+    // resolves — without this, the cleanup function below runs while
+    // `channel` is still null (subscribing nothing), and the channel that
+    // finishes subscribing afterward is never unsubscribed by anything.
+    let cancelled = false;
 
     (async () => {
       try {
         // @ts-ignore - dynamic import may be unavailable during build if package isn't installed
         const mod = await import('@supabase/supabase-js');
+        if (cancelled) return;
         supabase = mod.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        channel = supabase.channel('realtime-wireless-soil');
+        const ch = supabase.channel('realtime-wireless-soil');
 
         const handleChange = () => {
           queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID] });
         };
 
-        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'soil_sensor_readings', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
+        ch.on('postgres_changes', { event: '*', schema: 'public', table: 'soil_sensor_readings', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
           handleChange();
         });
 
-        await channel.subscribe();
+        await ch.subscribe();
+        if (cancelled) {
+          try { ch.unsubscribe(); } catch { /* ignore */ }
+          return;
+        }
+        channel = ch;
       } catch (err) {
         // If supabase isn't available or subscription fails, fall back to polling
         // eslint-disable-next-line no-console
@@ -261,6 +272,7 @@ export default function SoilAnalysisPage() {
     })();
 
     return () => {
+      cancelled = true;
       try {
         if (channel && typeof channel.unsubscribe === 'function') {
           channel.unsubscribe();

@@ -682,8 +682,9 @@ Do not add any extra commentary or fields.`;
     // 1. Fetch Local Telemetry History
     const history = await this.telemetryService.getEnvironmentHistory(deviceId);
 
-    // We only need the latest few readings to see trends (e.g. last 3 readings)
-    const recentHistory = history.slice(0, 3).map((r) => ({
+    // getEnvironmentHistory returns oldest→newest, so the latest readings
+    // are at the end of the array — slice(-3) for the last 3, not slice(0,3).
+    const recentHistory = history.slice(-3).map((r) => ({
       time: r.recorded_at,
       pressure: r.atmospheric_pressure_hpa,
       pressure_condition: r.pressure_condition,

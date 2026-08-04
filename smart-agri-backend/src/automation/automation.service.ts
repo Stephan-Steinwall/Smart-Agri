@@ -11,6 +11,7 @@ const WEATHER_DEVICE_ID = 'esp32_weather_01';
 export class AutomationService {
   private readonly logger = new Logger(AutomationService.name);
   private rainPredictionInFlight = false;
+  private buzzerTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly supabaseService: SupabaseService,
@@ -64,6 +65,23 @@ export class AutomationService {
         return;
       }
 
+      // Self-heal: if the DB says the buzzer is active but this process has
+      // no live shutoff timer for it (e.g. a restart/crash happened during
+      // the 15s window), the setTimeout that would have turned it off was
+      // lost with the old process — clear it directly so it can't stay on
+      // indefinitely with no other code path able to reset it.
+      if (settings.buzzer_active && !this.buzzerTimers.has(deviceId)) {
+        this.logger.warn(
+          `[Auto-Control] buzzer_active was stuck ON for ${deviceId} with no active shutoff timer (likely a restart mid-alert) — clearing it.`,
+        );
+        await this.telemetryService.toggleSystemSwitch(
+          deviceId,
+          'buzzer_active',
+          false,
+        );
+        settings.buzzer_active = false;
+      }
+
       // If the rain-blocking condition is no longer active, reset the buzzer mute flag
       if (!(moisture < settings.moisture_threshold_low && willRain && !settings.pump_water)) {
         this.telemetryService.resetBuzzerMute(deviceId);
@@ -102,9 +120,10 @@ export class AutomationService {
             'buzzer_active',
             true,
           );
-          
+
           // Turn off buzzer after 15 seconds
-          setTimeout(async () => {
+          const buzzerTimer = setTimeout(async () => {
+            this.buzzerTimers.delete(deviceId);
             await this.telemetryService.toggleSystemSwitch(
               deviceId,
               'buzzer_active',
@@ -112,6 +131,7 @@ export class AutomationService {
             );
             this.logger.log(`[Auto-Control] Buzzer deactivated after 15s.`);
           }, 15000);
+          this.buzzerTimers.set(deviceId, buzzerTimer);
         }
       } else if (
         moisture >= settings.moisture_threshold_high &&
