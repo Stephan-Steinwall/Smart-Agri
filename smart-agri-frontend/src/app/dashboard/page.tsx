@@ -55,7 +55,7 @@ function StatCard({
 }) {
   return (
     <div
-      className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in"
+      className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in min-w-0 overflow-hidden"
     >
       <div
         className="w-12 h-12 rounded-[1rem] flex items-center justify-center flex-shrink-0"
@@ -63,9 +63,9 @@ function StatCard({
       >
         <Icon className="w-6 h-6" style={{ color }} />
       </div>
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5">{label}</p>
-        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5 break-words">{label}</p>
+        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight break-words">
           {value}<span className="text-sm font-medium ml-1 text-slate-400">{unit}</span>
         </p>
       </div>
@@ -370,7 +370,7 @@ export default function Dashboard() {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             icon={CloudSun} label="Light Condition"
             value={LATEST.light_condition} unit=""
@@ -422,7 +422,7 @@ export default function Dashboard() {
         </div>
 
         {latestReading ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             icon={Droplets} label="Soil Moisture"
             value={latestReading.moisture?.toFixed(1) ?? '—'} unit="%"
@@ -485,7 +485,7 @@ export default function Dashboard() {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
             <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><Droplets className="w-3 h-3"/> Water</p>
             <p className="text-sm font-bold">2 hours ago</p>
@@ -615,7 +615,7 @@ export default function Dashboard() {
 
       {/* ── Floating AI Assistant Popup ────────────────────────────────────── */}
       {isChatOpen && (
-        <div className="fixed bottom-24 right-8 z-50 w-80 md:w-96 bg-white dark:bg-slate-900 rounded-[1.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-100 dark:border-slate-800 flex flex-col overflow-hidden animate-fade-in" style={{ height: '500px', maxHeight: '70vh' }}>
+        <div className="fixed bottom-24 right-4 left-4 sm:left-auto sm:right-8 z-50 w-auto sm:w-80 md:w-96 bg-white dark:bg-slate-900 rounded-[1.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-100 dark:border-slate-800 flex flex-col overflow-hidden animate-fade-in" style={{ height: '500px', maxHeight: '70vh' }}>
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4" style={{ background: 'linear-gradient(135deg, hsl(142, 65%, 28%), hsl(162, 55%, 40%))', color: 'white' }}>
             <div className="flex items-center gap-3">

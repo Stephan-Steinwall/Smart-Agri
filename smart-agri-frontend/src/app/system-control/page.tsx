@@ -954,13 +954,13 @@ export default function SystemControlPage() {
                 <p className="text-xs text-muted-foreground mt-1 font-medium">Fine-tune precisely when the AI should trigger each nutrient and water pump.</p>
               </div>
               
-              <div className="flex items-center gap-3 bg-background px-4 py-2.5 rounded-xl border border-border shadow-inner">
+              <div className="flex flex-wrap items-center gap-3 bg-background px-4 py-2.5 rounded-xl border border-border shadow-inner">
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
                   <Layers className="w-3.5 h-3.5" />
                   Crop Preset:
                 </label>
-                <select 
-                  className="bg-background border border-border hover:border-primary/50 rounded-lg text-sm font-semibold px-3 py-1.5 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-colors cursor-pointer text-foreground"
+                <select
+                  className="bg-background border border-border hover:border-primary/50 rounded-lg text-sm font-semibold px-3 py-1.5 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-colors cursor-pointer text-foreground min-w-0 flex-1 sm:flex-none sm:max-w-[220px]"
                   value={selectedCrop}
                   onChange={(e) => handleCropSelect(e.target.value)}
                   disabled={isGeneratingPreset}
@@ -1165,21 +1165,21 @@ export default function SystemControlPage() {
                 <button
                   onClick={() => handleQuickDose('water', 15)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   15s Dose
                 </button>
                 <button
                   onClick={() => handleQuickDose('water', 30)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   30s Dose
                 </button>
                 <button
                   onClick={() => handleQuickDose('water', 60)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   1m Dose
                 </button>
@@ -1233,21 +1233,21 @@ export default function SystemControlPage() {
                 <button
                   onClick={() => handleQuickDose('nitrogen', 10)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   10s (+50ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('nitrogen', 20)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   20s (+100ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('nitrogen', 40)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   40s (+200ml)
                 </button>
@@ -1301,21 +1301,21 @@ export default function SystemControlPage() {
                 <button
                   onClick={() => handleQuickDose('phosphorus', 15)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   15s (+50ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('phosphorus', 30)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   30s (+100ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('phosphorus', 45)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   45s (+150ml)
                 </button>
@@ -1369,21 +1369,21 @@ export default function SystemControlPage() {
                 <button
                   onClick={() => handleQuickDose('potassium', 15)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   15s (+50ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('potassium', 30)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   30s (+100ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('potassium', 45)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   45s (+150ml)
                 </button>

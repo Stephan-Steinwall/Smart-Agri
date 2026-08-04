@@ -506,14 +506,14 @@ export default function AccountManagement() {
                     <Phone className="w-3.5 h-3.5 text-primary" /> SMS Alert Number
                   </span>
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <select
                     value={countryCode}
                     onChange={(e) => {
                       setCountryCode(e.target.value);
                       setPhoneNumber(formatNumber(phoneNumber, e.target.value));
                     }}
-                    className="px-3 py-2.5 rounded-xl bg-muted/80 border border-border text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all cursor-pointer min-w-[120px]"
+                    className="px-3 py-2.5 rounded-xl bg-muted/80 border border-border text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all cursor-pointer w-[110px] sm:w-[130px] shrink-0"
                   >
                     {COUNTRY_CODES.map((c) => (
                       <option key={c.code} value={c.code} className="bg-card text-foreground font-semibold">
@@ -522,7 +522,7 @@ export default function AccountManagement() {
                     ))}
                   </select>
 
-                  <div className="relative flex-1">
+                  <div className="relative flex-1 min-w-0">
                     <input
                       type="text"
                       value={phoneNumber}

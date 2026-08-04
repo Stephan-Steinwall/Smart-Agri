@@ -255,7 +255,7 @@ export default function LoginPage() {
 
             {/* VIRTUAL SMARTPHONE WHATSAPP / SMS NOTIFICATION BANNER */}
             <div className="mb-6 p-4 bg-slate-900/90 border border-green-500/40 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.5)] flex flex-col gap-2">
-              <div className="flex items-center justify-between text-xs text-slate-400 border-b border-white/10 pb-2">
+              <div className="flex flex-wrap items-center justify-between gap-1 text-xs text-slate-400 border-b border-white/10 pb-2">
                 <div className="flex items-center gap-1.5 text-green-400 font-semibold uppercase tracking-wider text-[11px]">
                   <MessageSquare className="w-3.5 h-3.5" />
                   <span>WHATSAPP & SMS • JUST NOW ({maskPhone(pendingUser?.phone || pendingUser?.phone_number || '+1 (555) 382-9102')})</span>

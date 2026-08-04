@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun, FlaskConical, Sliders, Map
+  Sprout, LayoutDashboard, Bot, ChevronRight, Wifi, CloudSun, FlaskConical, Sliders, Map, Menu
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import AccountManagement from './AccountManagement';
@@ -49,6 +49,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+    setAnalyticsOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (pathname === '/' || pathname === '/login' || pathname === '/forgot-password') {
@@ -107,9 +114,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--background)' }}>
 
+      {/* ── Mobile drawer backdrop ────────────────────────────────────────── */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* ── Sidebar ───────────────────────────────────────────────────────── */}
       <aside
-        className="w-64 flex-shrink-0 flex flex-col"
+        className={`fixed inset-y-0 left-0 z-40 w-64 flex-shrink-0 flex flex-col transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
         style={{
           background: 'var(--sidebar)',
           borderRight: '1px solid var(--sidebar-border)',
@@ -153,12 +169,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               return (
                 <div key={item.label} className="group relative">
                   <div
-                    className="flex items-center px-3 py-3 rounded-xl text-sm font-medium transition-all duration-200 cursor-default"
+                    className="flex items-center px-3 py-3 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer"
                     style={{
                       color: isActive ? 'white' : 'var(--sidebar-foreground)',
                       background: isActive ? 'hsl(142, 58%, 28%)' : 'transparent',
                       boxShadow: isActive ? 'var(--shadow-sidebar-active)' : 'none',
                     }}
+                    onClick={() => setAnalyticsOpen(o => !o)}
                     onMouseEnter={e => {
                       if (!isActive) {
                         (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-accent)';
@@ -177,23 +194,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       style={{ color: isActive ? 'hsl(142, 70%, 75%)' : 'inherit', opacity: isActive ? 1 : 0.7 }}
                     />
                     <span className="flex-1">{item.label}</span>
-                    <ChevronRight className="w-3.5 h-3.5 opacity-60 group-hover:rotate-90 transition-transform" />
+                    <ChevronRight className={`w-3.5 h-3.5 opacity-60 transition-transform ${analyticsOpen ? 'rotate-90' : 'group-hover:rotate-90'}`} />
                   </div>
-                  
+
                   {/* Hover dropdown (Accordion) */}
-                  <div className="max-h-0 overflow-hidden transition-all duration-300 ease-in-out group-hover:max-h-40">
+                  <div className={`max-h-0 overflow-hidden transition-all duration-300 ease-in-out group-hover:max-h-40 ${analyticsOpen ? 'max-h-40' : ''}`}>
                     <div className="flex flex-col gap-1 py-1.5 pl-10 pr-2">
                       {item.children.map(child => {
                         const isChildActive = pathname === child.href;
                         return (
-                          <Link 
+                          <Link
                             key={child.href}
                             href={child.href}
                             className="px-3 py-2 text-xs font-medium rounded-lg transition-colors"
-                            style={{ 
+                            style={{
                               color: isChildActive ? 'white' : 'var(--sidebar-foreground)',
                               background: isChildActive ? 'rgba(255,255,255,0.1)' : 'transparent'
                             }}
+                            onClick={() => setMobileNavOpen(false)}
                             onMouseEnter={e => {
                               if (!isChildActive) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
                             }}
@@ -223,6 +241,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   background: isActive ? 'hsl(142, 58%, 28%)' : 'transparent',
                   boxShadow: isActive ? 'var(--shadow-sidebar-active)' : 'none',
                 }}
+                onClick={() => setMobileNavOpen(false)}
                 onMouseEnter={e => {
                   if (!isActive) {
                     (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-accent)';
@@ -264,27 +283,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Top Header */}
         <header
-          className="h-16 flex-shrink-0 flex items-center px-8 justify-between"
+          className="h-16 flex-shrink-0 flex items-center gap-3 px-4 sm:px-6 lg:px-8 justify-between"
           style={{
             background: 'var(--card)',
             borderBottom: '1px solid var(--border)',
             boxShadow: '0 1px 0 rgba(0,0,0,0.04)',
           }}
         >
+          {/* Hamburger: mobile/tablet nav trigger */}
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            className="lg:hidden flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0 transition-colors duration-150 hover:bg-[var(--muted)] focus:outline-none"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="w-4.5 h-4.5" style={{ color: 'var(--foreground)' }} />
+          </button>
+
           {/* Left: Breadcrumb */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--muted-foreground)' }}>
               <Sprout className="w-3.5 h-3.5" />
               <span>SmartAgri</span>
               <ChevronRight className="w-3.5 h-3.5 opacity-50" />
             </div>
-            <h1 className="text-base font-semibold" style={{ color: 'var(--foreground)' }}>
+            <h1 className="text-base font-semibold truncate" style={{ color: 'var(--foreground)' }}>
               {pageTitle}
             </h1>
           </div>
 
           {/* Right: Controls */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <NotificationBell />
             {/* Account Management Modal Trigger & Dialog */}
             <AccountManagement />
@@ -292,7 +320,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </header>
 
         {/* Page Content */}
-        <div className="flex-1 overflow-auto p-8">
+        <div className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
           {children}
         </div>
       </main>
