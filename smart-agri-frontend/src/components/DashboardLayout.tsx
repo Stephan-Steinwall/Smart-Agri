@@ -51,7 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    if (pathname === '/' || pathname === '/login') {
+    if (pathname === '/' || pathname === '/login' || pathname === '/forgot-password') {
       setTimeout(() => setIsAuthorized(true), 0);
       return;
     }
@@ -86,7 +86,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [pathname, router]);
 
   // Bypass dashboard layout for the welcome page and login page
-  if (pathname === '/' || pathname === '/login') {
+  if (pathname === '/' || pathname === '/login' || pathname === '/forgot-password') {
     return <>{children}</>;
   }
 

@@ -2,8 +2,10 @@ import { Controller, Get, Param, Post, Body, UseGuards } from '@nestjs/common';
 import { TelemetryService } from './telemetry.service';
 import { AuthGuard } from '../auth/auth.guard';
 import {
+  ForgotPasswordDto,
   LoginDto,
   ResendOtpDto,
+  ResetPasswordDto,
   SendSmsDto,
   UpdateAccountDto,
   UpdateSystemControlPasswordDto,
@@ -148,6 +150,20 @@ export class TelemetryController {
   @Post('auth/resend-otp')
   async resendOtp(@Body() body: ResendOtpDto) {
     return this.telemetryService.resendOtp(body.emailOrUsername);
+  }
+
+  @Post('auth/forgot-password')
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
+    return this.telemetryService.forgotPassword(body.emailOrUsername);
+  }
+
+  @Post('auth/reset-password')
+  async resetPassword(@Body() body: ResetPasswordDto) {
+    return this.telemetryService.resetPassword(
+      body.emailOrUsername,
+      body.code,
+      body.newPassword,
+    );
   }
 
   // ── Session-required account/security routes ──

@@ -16,6 +16,10 @@ export class TelemetryService {
     string,
     { code: string; user: any; expiresAt: number; attempts: number }
   >();
+  private passwordResetSessions = new Map<
+    string,
+    { code: string; user: any; expiresAt: number; attempts: number }
+  >();
 
   constructor(
     private readonly supabaseService: SupabaseService,
@@ -1116,6 +1120,175 @@ export class TelemetryService {
     };
   }
 
+  async forgotPassword(emailOrUsername: string) {
+    if (!emailOrUsername)
+      return { success: false, message: 'Email or username is required.' };
+    try {
+      const cleanInput = emailOrUsername.trim().toLowerCase();
+
+      const client = this.supabaseService.getClient();
+      const { data: allUsers, error } = await client
+        .from('user_accounts')
+        .select('*');
+      if (error) {
+        this.logger.warn(`Error querying user_accounts: ${error.message}`);
+        return { success: false, message: `Database error: ${error.message}` };
+      }
+      if (!allUsers || allUsers.length === 0) {
+        return {
+          success: false,
+          message: 'user_accounts table is empty or account not found.',
+        };
+      }
+
+      const matchedUser = allUsers.find((u) => {
+        const emailMatch =
+          u.email && String(u.email).trim().toLowerCase() === cleanInput;
+        const userMatch =
+          u.username && String(u.username).trim().toLowerCase() === cleanInput;
+        return emailMatch || userMatch;
+      });
+
+      if (!matchedUser) {
+        return {
+          success: false,
+          message: 'Account not found in user_accounts table.',
+        };
+      }
+
+      if (matchedUser.account_status === 'disabled') {
+        return {
+          success: false,
+          message: 'This account has been disabled. Contact an administrator.',
+        };
+      }
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const sessionKey = (
+        matchedUser.email ||
+        matchedUser.username ||
+        cleanInput
+      )
+        .toString()
+        .toLowerCase()
+        .trim();
+
+      this.passwordResetSessions.set(sessionKey, {
+        code,
+        user: matchedUser,
+        expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes expiration
+        attempts: 0,
+      });
+
+      const userPhone =
+        matchedUser.phone ||
+        matchedUser.phone_number ||
+        matchedUser.mobile ||
+        '+1 (555) 382-9102';
+
+      // Password reset always requires the code, even for accounts that
+      // opted out of 2FA convenience at login via the :NO_2FA suffix.
+      const cleanPhone = userPhone.replace(':NO_2FA', '');
+
+      this.sendSms(cleanPhone, code, matchedUser.email);
+
+      return {
+        success: true,
+        user: {
+          email: matchedUser.email,
+          username: matchedUser.username,
+          phone: cleanPhone,
+        },
+        message: 'A password reset code has been dispatched to your registered phone.',
+      };
+    } catch (err: any) {
+      this.logger.error(`Forgot password error: ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  }
+
+  async resetPassword(
+    emailOrUsername: string,
+    code: string,
+    newPassword: string,
+  ) {
+    if (!emailOrUsername || !code || !newPassword)
+      return {
+        success: false,
+        message: 'Email/username, code, and new password are required.',
+      };
+    const sessionKey = emailOrUsername.toString().toLowerCase().trim();
+    const session = this.passwordResetSessions.get(sessionKey);
+
+    if (!session) {
+      return {
+        success: false,
+        message:
+          'No active password reset session found. Please click Forgot Password again.',
+      };
+    }
+
+    if (Date.now() > session.expiresAt) {
+      this.passwordResetSessions.delete(sessionKey);
+      return {
+        success: false,
+        message:
+          'Password reset code has expired (5-minute limit). Please click Forgot Password again.',
+      };
+    }
+
+    if (session.attempts >= 5) {
+      this.passwordResetSessions.delete(sessionKey);
+      return {
+        success: false,
+        message:
+          'Too many incorrect attempts. For security, please click Forgot Password again.',
+      };
+    }
+
+    if (String(session.code).trim() !== String(code).trim()) {
+      session.attempts += 1;
+      return {
+        success: false,
+        message: `Invalid reset code. ${5 - session.attempts} attempt(s) remaining.`,
+      };
+    }
+
+    try {
+      const user = session.user;
+      const matchCol = user.id != null ? 'id' : user.email ? 'email' : 'username';
+      const matchVal = user.id ?? user.email ?? user.username;
+      const newHash = await bcrypt.hash(newPassword, 10);
+
+      const { error: updateErr } = await this.supabaseService
+        .getClient()
+        .from('user_accounts')
+        .update({
+          user_password_hash: newHash,
+          updated_at: new Date().toISOString(),
+        })
+        .eq(matchCol, matchVal);
+
+      if (updateErr) {
+        this.logger.error(
+          `Error updating user_password_hash during reset: ${updateErr.message}`,
+        );
+        return { success: false, message: `Database error: ${updateErr.message}` };
+      }
+
+      this.passwordResetSessions.delete(sessionKey);
+      this.loginAttempts.delete(sessionKey);
+
+      return {
+        success: true,
+        message: 'Password has been reset successfully. Please log in with your new password.',
+      };
+    } catch (err: any) {
+      this.logger.error(`Reset password error: ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  }
+
   async updateAccount(body: {
     email?: string;
     oldEmail?: string;
@@ -1198,7 +1371,7 @@ export class TelemetryService {
         }
       }
       if (body.newPassword) {
-        updatePayload.password_hash = await bcrypt.hash(body.newPassword, 10);
+        updatePayload.user_password_hash = await bcrypt.hash(body.newPassword, 10);
       }
       if ('updated_at' in target)
         updatePayload.updated_at = new Date().toISOString();

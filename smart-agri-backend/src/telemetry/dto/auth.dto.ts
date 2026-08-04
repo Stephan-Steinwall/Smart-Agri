@@ -40,6 +40,26 @@ export class ResendOtpDto {
   emailOrUsername: string;
 }
 
+export class ForgotPasswordDto {
+  @IsString()
+  @MinLength(1)
+  emailOrUsername: string;
+}
+
+export class ResetPasswordDto {
+  @IsString()
+  @MinLength(1)
+  emailOrUsername: string;
+
+  @IsString()
+  @MinLength(1)
+  code: string;
+
+  @IsString()
+  @MinLength(6)
+  newPassword: string;
+}
+
 export class UpdateAccountDto {
   @IsOptional()
   @IsString()
