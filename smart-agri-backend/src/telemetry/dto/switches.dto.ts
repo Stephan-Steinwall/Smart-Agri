@@ -9,6 +9,8 @@ const VALID_SWITCHES = [
   'system_switch',
   'light_01',
   'light_02',
+  'buzzer_active',
+  'rain_buzzer_enabled',
 ] as const;
 
 export class ToggleSwitchDto {

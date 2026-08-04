@@ -12,7 +12,7 @@ import {
   ShieldAlert, CheckCircle2, Clock, AlertTriangle, RefreshCw, Play,
   Square, Settings, Gauge, ChevronRight, Wifi, Layers, Sparkles,
   Timer, History, ArrowUpRight, Check, Flame, Radio, AlertCircle,
-  Lock, Eye, EyeOff, KeyRound, CloudRain, Trash2
+  Lock, Eye, EyeOff, KeyRound, CloudRain, Trash2, Bell
 } from 'lucide-react';
 
 const DEVICE_ID = 'esp32_weather_01';
@@ -113,6 +113,15 @@ export default function SystemControlPage() {
 
   const [isAutoMisterEnabled, setIsAutoMisterEnabled] = useState(false);
   const [isAutoMisterLoading, setIsAutoMisterLoading] = useState(false);
+
+  // Pump Logs deletion state
+  const [selectedLogs, setSelectedLogs] = useState<Set<string>>(new Set());
+  const [isDeletingLogs, setIsDeletingLogs] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Rain Buzzer state
+  const [isRainBuzzerEnabled, setIsRainBuzzerEnabled] = useState(true);
+  const [isRainBuzzerLoading, setIsRainBuzzerLoading] = useState(false);
   
   // Rain Prediction state
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(true);
@@ -159,7 +168,19 @@ export default function SystemControlPage() {
     setIsGeneratingPreset(true);
     try {
       const res = await apiClient.get(`/ai/crop-thresholds/${cropName}`);
-      setThresholds(res.data);
+      const d = res.data || {};
+      setThresholds({
+        moisture_threshold_low: d.moisture_threshold_low ?? 20,
+        moisture_threshold_high: d.moisture_threshold_high ?? 50,
+        nitrogen_threshold_low: d.nitrogen_threshold_low ?? 30,
+        nitrogen_threshold_high: d.nitrogen_threshold_high ?? 70,
+        phosphorus_threshold_low: d.phosphorus_threshold_low ?? 30,
+        phosphorus_threshold_high: d.phosphorus_threshold_high ?? 70,
+        potassium_threshold_low: d.potassium_threshold_low ?? 30,
+        potassium_threshold_high: d.potassium_threshold_high ?? 70,
+        light_intensity_threshold_lux: d.light_intensity_threshold_lux ?? 5000,
+        humidity_threshold_percent: d.humidity_threshold_percent ?? 45,
+      });
     } catch (e: any) {
       console.error("Failed to fetch crop thresholds", e);
       toast.error("Failed to fetch AI thresholds for this crop.");
@@ -174,6 +195,16 @@ export default function SystemControlPage() {
       const res = await apiClient.get(`/ai/rain-prediction-status/${DEVICE_ID}`);
       return res.data;
     },
+    refetchInterval: 5000,
+  });
+
+  const { data: deferralStatus } = useQuery({
+    queryKey: ['rainDeferralStatus'],
+    queryFn: async () => {
+      const res = await apiClient.get(`/telemetry/rain-deferral-status/${DEVICE_ID}`);
+      return res.data;
+    },
+    refetchInterval: 5000,
   });
 
   const { data: customPresets, refetch: refetchCustomPresets } = useQuery({
@@ -251,6 +282,24 @@ export default function SystemControlPage() {
     }
   };
 
+  const handleToggleRainBuzzer = async () => {
+    const newState = !isRainBuzzerEnabled;
+    setIsRainBuzzerEnabled(newState);
+    setIsRainBuzzerLoading(true);
+    try {
+      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, { 
+        pumpName: 'rain_buzzer_enabled', 
+        state: newState 
+      });
+    } catch (e: any) {
+      console.error("Failed to toggle rain buzzer", e);
+      toast.error("Failed to update database: " + e.message);
+      setIsRainBuzzerEnabled(!newState); // revert
+    } finally {
+      setIsRainBuzzerLoading(false);
+    }
+  };
+
   const handleSaveThresholds = async () => {
     if (selectedCrop === 'Manual') {
       const presetName = window.prompt("Enter a name to save this custom threshold profile (e.g., 'My Greenhouse Tomatoes'):");
@@ -324,7 +373,12 @@ export default function SystemControlPage() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [pumps]);
+    // handlePumpToggle is only ever called here with forcedState=false, which
+    // never reads `pumps` (it skips straight to newState=false), so this
+    // interval doesn't need to be torn down and rebuilt every time the
+    // 3s switchData poll produces a new `pumps` object reference.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const getDbName = (key: string) => {
     if (key.startsWith('light_')) return key;
@@ -361,6 +415,9 @@ export default function SystemControlPage() {
       }
       if (switchData.ai_automation_enabled !== undefined && switchData.ai_automation_enabled !== null) {
         setIsAiAutomationEnabled(switchData.ai_automation_enabled);
+      }
+      if (switchData.rain_buzzer_enabled !== undefined && switchData.rain_buzzer_enabled !== null) {
+        setIsRainBuzzerEnabled(switchData.rain_buzzer_enabled);
       }
       if (switchData.auto_grow_light_enabled !== undefined && switchData.auto_grow_light_enabled !== null) {
         setIsAutoGrowLightEnabled(switchData.auto_grow_light_enabled);
@@ -445,10 +502,13 @@ export default function SystemControlPage() {
       // to also write straight to Supabase with the public anon key as an
       // "optimistic" pre-write, which meant anyone with that key (it ships in
       // every page load) could flip switches without logging in at all.
-      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
+      const res = await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
         pumpName: 'system_switch',
         state: newState
       });
+      if (res.data?.success === false) {
+        throw new Error(res.data?.message || 'Database did not confirm the change.');
+      }
       refetchLogs();
     } catch (e) {
       console.error('Failed to toggle system switch', e);
@@ -472,7 +532,7 @@ export default function SystemControlPage() {
     setActiveTimers({});
 
     // Send stop signal for every pump to backend
-    const allPumps = ['pump_water', 'pump_nitrogen', 'pump_phosphorus', 'pump_potassium', 'light_01', 'light_02', 'system_switch'];
+    const allPumps = ['pump_water', 'pump_nitrogen', 'pump_phosphorus', 'pump_potassium', 'pump_mister', 'light_01', 'light_02', 'system_switch'];
     for (const p of allPumps) {
       try {
         await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
@@ -491,6 +551,39 @@ export default function SystemControlPage() {
     handleSystemToggle(); // Turn system back on
   };
 
+  // Handlers for deleting logs
+  const handleSelectAllLogs = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked && pumpLogs) {
+      setSelectedLogs(new Set(pumpLogs.slice(0, 15).map(log => log.id || log.session_id || '')));
+    } else {
+      setSelectedLogs(new Set());
+    }
+  };
+
+  const handleSelectLog = (logId: string, checked: boolean) => {
+    const newSelected = new Set(selectedLogs);
+    if (checked) newSelected.add(logId);
+    else newSelected.delete(logId);
+    setSelectedLogs(newSelected);
+  };
+
+  const handleDeleteLogs = async () => {
+    if (selectedLogs.size === 0) return;
+    
+    setIsDeletingLogs(true);
+    try {
+      await apiClient.post('/telemetry/pump-logs/delete', { logIds: Array.from(selectedLogs) });
+      toast.success('Records deleted successfully');
+      setSelectedLogs(new Set());
+      setShowDeleteConfirm(false);
+      refetchLogs();
+    } catch (e: any) {
+      toast.error('Failed to delete records: ' + (e.response?.data?.message || e.message));
+    } finally {
+      setIsDeletingLogs(false);
+    }
+  };
+
   const handlePumpToggle = async (pumpKey: string, dbName: string, forcedState?: boolean) => {
     if (!isSystemOn && forcedState !== false) {
       toast.error("Cannot activate pump while Master System Switch is OFF. Please turn the System ON first.");
@@ -506,10 +599,13 @@ export default function SystemControlPage() {
 
     // Send control command via backend
     try {
-      await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
+      const res = await apiClient.post(`/telemetry/system-switches/${DEVICE_ID}/toggle`, {
         pumpName: dbName,
         state: newState
       });
+      if (res.data?.success === false) {
+        throw new Error(res.data?.message || 'Database did not confirm the change.');
+      }
       refetchLogs();
     } catch (e: any) {
       console.error(`Failed to toggle ${pumpKey}`, e);
@@ -856,6 +952,19 @@ export default function SystemControlPage() {
               <Sparkles className="w-4 h-4" />
               <span>{isAiAutomationEnabled ? 'AI Engine: ON' : 'AI Engine: OFF'}</span>
             </button>
+
+            <button
+              onClick={handleToggleRainBuzzer}
+              disabled={isRainBuzzerLoading}
+              className={`px-6 py-3.5 rounded-xl font-bold text-sm transition-all duration-300 flex items-center gap-2.5 border ${
+                isRainBuzzerEnabled
+                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700 shadow-sm'
+                  : 'bg-background text-foreground border-border hover:bg-muted'
+              } ${isRainBuzzerLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <Bell className="w-4 h-4" />
+              <span>{isRainBuzzerEnabled ? 'Rain Buzzer: ON' : 'Rain Buzzer: OFF'}</span>
+            </button>
           </div>
         </div>
 
@@ -868,13 +977,13 @@ export default function SystemControlPage() {
                 <p className="text-xs text-muted-foreground mt-1 font-medium">Fine-tune precisely when the AI should trigger each nutrient and water pump.</p>
               </div>
               
-              <div className="flex items-center gap-3 bg-background px-4 py-2.5 rounded-xl border border-border shadow-inner">
+              <div className="flex flex-wrap items-center gap-3 bg-background px-4 py-2.5 rounded-xl border border-border shadow-inner">
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
                   <Layers className="w-3.5 h-3.5" />
                   Crop Preset:
                 </label>
-                <select 
-                  className="bg-background border border-border hover:border-primary/50 rounded-lg text-sm font-semibold px-3 py-1.5 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-colors cursor-pointer text-foreground"
+                <select
+                  className="bg-background border border-border hover:border-primary/50 rounded-lg text-sm font-semibold px-3 py-1.5 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-colors cursor-pointer text-foreground min-w-0 flex-1 sm:flex-none sm:max-w-[220px]"
                   value={selectedCrop}
                   onChange={(e) => handleCropSelect(e.target.value)}
                   disabled={isGeneratingPreset}
@@ -1002,6 +1111,42 @@ export default function SystemControlPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
           
+          {/* Rain Deferral Alert */}
+          {deferralStatus?.showBanner && (
+            <div className="col-span-full bg-blue-50/50 dark:bg-blue-950/40 border border-blue-500/50 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                  <CloudRain className="w-6 h-6 text-blue-500" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-blue-900 dark:text-blue-200">AI Rain Deferral Active</h3>
+                  <p className="text-blue-700 dark:text-blue-300 text-sm mt-0.5">
+                    Water pump needs to be activated (Moisture is below {thresholds?.moisture_threshold_low}%). <br className="hidden sm:block"/>
+                    But didn't activate because of rain prediction.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={async () => {
+                    try {
+                      await apiClient.post(`/telemetry/mute-buzzer/${DEVICE_ID}`);
+                      toast.success("Buzzer silenced for this rain event.");
+                    } catch (e: any) {
+                      toast.error("Failed to mute buzzer.");
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-800/60 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800"
+                >
+                  Silence Buzzer
+                </button>
+                <div className="px-4 py-2 bg-white dark:bg-slate-900/60 rounded-lg border border-blue-100 dark:border-blue-900 shadow-sm flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Monitoring Weather</span>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Water Pump */}
           <div className={`rounded-[1.75rem] p-6 transition-all border-2 flex flex-col justify-between ${
             pumps.water
@@ -1043,21 +1188,21 @@ export default function SystemControlPage() {
                 <button
                   onClick={() => handleQuickDose('water', 15)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   15s Dose
                 </button>
                 <button
                   onClick={() => handleQuickDose('water', 30)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   30s Dose
                 </button>
                 <button
                   onClick={() => handleQuickDose('water', 60)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-blue-100 dark:hover:bg-blue-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   1m Dose
                 </button>
@@ -1111,21 +1256,21 @@ export default function SystemControlPage() {
                 <button
                   onClick={() => handleQuickDose('nitrogen', 10)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   10s (+50ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('nitrogen', 20)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   20s (+100ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('nitrogen', 40)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-purple-100 dark:hover:bg-purple-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   40s (+200ml)
                 </button>
@@ -1179,21 +1324,21 @@ export default function SystemControlPage() {
                 <button
                   onClick={() => handleQuickDose('phosphorus', 15)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   15s (+50ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('phosphorus', 30)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   30s (+100ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('phosphorus', 45)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-amber-100 dark:hover:bg-amber-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   45s (+150ml)
                 </button>
@@ -1247,21 +1392,21 @@ export default function SystemControlPage() {
                 <button
                   onClick={() => handleQuickDose('potassium', 15)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   15s (+50ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('potassium', 30)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   30s (+100ml)
                 </button>
                 <button
                   onClick={() => handleQuickDose('potassium', 45)}
                   disabled={!isSystemOn || emergencyStop}
-                  className="px-2 py-1.5 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-xs font-bold transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 sm:px-2 rounded-lg bg-muted hover:bg-orange-100 dark:hover:bg-orange-900/50 text-foreground text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors disabled:opacity-50"
                 >
                   45s (+150ml)
                 </button>
@@ -1565,9 +1710,21 @@ export default function SystemControlPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Live Syncing (3s interval)</span>
+          <div className="flex items-center gap-4 text-xs font-semibold text-muted-foreground">
+            {selectedLogs.size > 0 && (
+              <button 
+                onClick={() => setShowDeleteConfirm(true)} 
+                disabled={isDeletingLogs}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-800/50 text-red-600 dark:text-red-400 rounded-lg transition-colors border border-red-200 dark:border-red-900"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                {isDeletingLogs ? 'Deleting...' : `Delete Selected (${selectedLogs.size})`}
+              </button>
+            )}
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Live Syncing (3s interval)</span>
+            </div>
           </div>
         </div>
 
@@ -1581,6 +1738,14 @@ export default function SystemControlPage() {
             <table className="w-full text-left text-sm border-collapse">
               <thead>
                 <tr className="border-b border-border text-muted-foreground text-xs uppercase tracking-wider font-extrabold">
+                  <th className="pb-3 pl-4 w-10">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-slate-300 dark:border-slate-700 bg-transparent text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                      onChange={handleSelectAllLogs}
+                      checked={pumpLogs != null && pumpLogs.slice(0,15).length > 0 && selectedLogs.size === pumpLogs.slice(0,15).length}
+                    />
+                  </th>
                   <th className="pb-3 pl-2">Pump Name</th>
                   <th className="pb-3">Status</th>
                   <th className="pb-3">Start Time</th>
@@ -1603,6 +1768,14 @@ export default function SystemControlPage() {
 
                   return (
                     <tr key={log.id || log.session_id || index} className="hover:bg-muted/40 transition-colors group">
+                      <td className="py-3.5 pl-4">
+                        <input 
+                          type="checkbox" 
+                          className="rounded border-slate-300 dark:border-slate-700 bg-transparent text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                          checked={selectedLogs.has(log.id || log.session_id || '')}
+                          onChange={(e) => handleSelectLog(log.id || log.session_id || '', e.target.checked)}
+                        />
+                      </td>
                       <td className="py-3.5 pl-2 font-bold text-foreground">
                         {formatPumpName(log.pump_name)}
                       </td>
@@ -1650,11 +1823,6 @@ export default function SystemControlPage() {
                 })}
               </tbody>
             </table>
-            {pumpLogs.length > 15 && (
-              <div className="mt-4 pt-3 border-t border-border text-center text-xs text-muted-foreground font-medium">
-                Showing latest 15 activations out of {pumpLogs.length} total logged records in <code className="font-mono">pump_activation_logs</code>.
-              </div>
-            )}
           </div>
         ) : (
           <div className="py-12 text-center text-muted-foreground bg-muted/20 rounded-2xl border border-dashed border-border">
@@ -1664,6 +1832,51 @@ export default function SystemControlPage() {
           </div>
         )}
       </section>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-6 h-6 text-red-600 dark:text-red-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">Confirm Deletion</h3>
+                  <p className="text-sm text-muted-foreground mt-0.5">Are you sure you want to delete {selectedLogs.size} record{selectedLogs.size !== 1 && 's'}?</p>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground mb-6">
+                This action cannot be undone. The selected pump activation logs will be permanently removed from the database.
+              </p>
+              <div className="flex items-center gap-3 justify-end">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={isDeletingLogs}
+                  className="px-4 py-2 rounded-lg font-medium text-sm transition-colors hover:bg-muted text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteLogs}
+                  disabled={isDeletingLogs}
+                  className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-sm transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isDeletingLogs ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    'Delete Records'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

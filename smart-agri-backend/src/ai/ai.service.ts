@@ -100,7 +100,6 @@ export class AiService {
       - latest_soil_reading (soil_moisture_percent, soil_temperature_celsius, ec_levels, soil_ph, nitrogen, phosphorus, potassium, salinity, tds_mg_l, sensor_status)
       - pump_activation_logs (session_id, device_id, pump_name, start_time, end_time, status)
       - soil_readings (soil_moisture_percent, soil_temperature_celsius, soil_ph, nitrogen, phosphorus, potassium, created_at)
-      - soil_sensor_readings (soil_moisture_percent, soil_temperature_celsius, conductivity, soil_ph, nitrogen, phosphorus, potassium, created_at)
       - system_alerts (severity, message, created_at, read_at)
       - system_switches (device_id, pump_water, pump_nitrogen, pump_phosphorus, pump_potassium, system_switch, light_01, light_02, etc.)
 
@@ -683,8 +682,9 @@ Do not add any extra commentary or fields.`;
     // 1. Fetch Local Telemetry History
     const history = await this.telemetryService.getEnvironmentHistory(deviceId);
 
-    // We only need the latest few readings to see trends (e.g. last 3 readings)
-    const recentHistory = history.slice(0, 3).map((r) => ({
+    // getEnvironmentHistory returns oldest→newest, so the latest readings
+    // are at the end of the array — slice(-3) for the last 3, not slice(0,3).
+    const recentHistory = history.slice(-3).map((r) => ({
       time: r.recorded_at,
       pressure: r.atmospheric_pressure_hpa,
       pressure_condition: r.pressure_condition,
@@ -692,6 +692,7 @@ Do not add any extra commentary or fields.`;
       dew_point: r.dew_point_c,
       temp: r.air_temperature_c,
       dew_point_spread: r.dew_point_spread_c,
+      rain_detected: r.rain_detected,
     }));
 
     // 2. Fetch Regional Forecast from Open-Meteo

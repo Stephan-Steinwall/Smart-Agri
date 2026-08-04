@@ -40,14 +40,30 @@ export class ResendOtpDto {
   emailOrUsername: string;
 }
 
+export class ForgotPasswordDto {
+  @IsString()
+  @MinLength(1)
+  emailOrUsername: string;
+}
+
+export class ResetPasswordDto {
+  @IsString()
+  @MinLength(1)
+  emailOrUsername: string;
+
+  @IsString()
+  @MinLength(1)
+  code: string;
+
+  @IsString()
+  @MinLength(8)
+  newPassword: string;
+}
+
 export class UpdateAccountDto {
   @IsOptional()
   @IsString()
   email?: string;
-
-  @IsOptional()
-  @IsString()
-  oldEmail?: string;
 
   @IsOptional()
   @IsString()
@@ -64,6 +80,11 @@ export class UpdateAccountDto {
   @IsOptional()
   @IsBoolean()
   twoFactorEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  newPassword?: string;
 }
 
 export class VerifySystemControlDto {

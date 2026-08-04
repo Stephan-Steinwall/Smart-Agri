@@ -60,6 +60,7 @@ export default function AiAssistant() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadSessions = async () => {
@@ -87,9 +88,14 @@ export default function AiAssistant() {
 
   useEffect(() => {
     if (!activeSessionId) return;
+    // Guards against a slower response for a session the user has already
+    // switched away from overwriting the (correct, already-loaded) messages
+    // for the session they're now viewing.
+    let cancelled = false;
     const fetchHistory = async () => {
       try {
         const res = await apiClient.get(`/ai/history/${activeSessionId}`);
+        if (cancelled) return;
         if (res.data && res.data.length > 0) {
           const loadedMessages: Message[] = res.data.map((row: any) => ({
             role: row.role === 'assistant' ? 'ai' : 'user',
@@ -107,6 +113,7 @@ export default function AiAssistant() {
           ]);
         }
       } catch (e) {
+        if (cancelled) return;
         // Backend offline fallback
         setMessages([
           {
@@ -118,6 +125,7 @@ export default function AiAssistant() {
       }
     };
     fetchHistory();
+    return () => { cancelled = true; };
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -160,14 +168,23 @@ export default function AiAssistant() {
 
   return (
     <div className="max-w-6xl mx-auto h-[calc(100vh-8rem)] flex gap-6 animate-fade-in">
-      
+
+      {/* ── Sessions drawer backdrop (mobile/tablet only) ───────────────────── */}
+      {sessionsOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-30 md:hidden"
+          onClick={() => setSessionsOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* ── Sidebar (Sessions List) ────────────────────────────────────────── */}
-      <div 
-        className="hidden md:flex flex-col w-72 rounded-[1.5rem] overflow-hidden flex-shrink-0 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"
+      <div
+        className={`fixed inset-y-0 left-0 z-40 w-72 flex-col overflow-hidden bg-white dark:bg-slate-900 border-r border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-transform duration-300 ease-in-out md:static md:z-auto md:translate-x-0 md:flex md:rounded-[1.5rem] md:border md:flex-shrink-0 ${sessionsOpen ? 'translate-x-0 flex' : '-translate-x-full hidden md:flex'}`}
       >
         <div className="p-4" style={{ borderBottom: '1px solid var(--border)' }}>
           <button
-            onClick={startNewChat}
+            onClick={() => { startNewChat(); setSessionsOpen(false); }}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all card-lift"
             style={{ background: 'hsl(142, 65%, 94%)', color: 'hsl(142, 65%, 26%)' }}
           >
@@ -182,7 +199,7 @@ export default function AiAssistant() {
           {sessions.map((session) => (
             <button
               key={session.sessionId}
-              onClick={() => setActiveSessionId(session.sessionId)}
+              onClick={() => { setActiveSessionId(session.sessionId); setSessionsOpen(false); }}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors"
               style={{
                 background: activeSessionId === session.sessionId ? 'var(--muted)' : 'transparent',
@@ -228,12 +245,21 @@ export default function AiAssistant() {
               </div>
             </div>
           </div>
-          <div
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
-            style={{ background: 'rgba(255,255,255,0.12)' }}
-          >
-            <Sprout className="w-3.5 h-3.5 text-green-200" />
-            <span className="text-[11px] text-green-100 font-medium">SmartAgri AI</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSessionsOpen(true)}
+              className="md:hidden flex items-center justify-center w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 transition-colors flex-shrink-0"
+              aria-label="Open chat history"
+            >
+              <MessageSquare className="w-4 h-4 text-white" />
+            </button>
+            <div
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
+              style={{ background: 'rgba(255,255,255,0.12)' }}
+            >
+              <Sprout className="w-3.5 h-3.5 text-green-200" />
+              <span className="text-[11px] text-green-100 font-medium">SmartAgri AI</span>
+            </div>
           </div>
         </div>
 

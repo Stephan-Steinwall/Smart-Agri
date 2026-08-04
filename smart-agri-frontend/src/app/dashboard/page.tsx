@@ -55,7 +55,7 @@ function StatCard({
 }) {
   return (
     <div
-      className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in"
+      className="rounded-[1.5rem] p-5 flex items-center gap-4 transition-all hover:-translate-y-1 hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-fade-in min-w-0 overflow-hidden"
     >
       <div
         className="w-12 h-12 rounded-[1rem] flex items-center justify-center flex-shrink-0"
@@ -63,9 +63,9 @@ function StatCard({
       >
         <Icon className="w-6 h-6" style={{ color }} />
       </div>
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5">{label}</p>
-        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-0.5 break-words">{label}</p>
+        <p className="text-lg font-bold text-slate-900 dark:text-white tracking-tight break-words">
           {value}<span className="text-sm font-medium ml-1 text-slate-400">{unit}</span>
         </p>
       </div>
@@ -187,6 +187,19 @@ export default function Dashboard() {
     queryFn: async () => {
       try {
         const res = await apiClient.get(`/telemetry/system-switches/${DEVICE_ID}`);
+        return res.data;
+      } catch (e) {
+        return null;
+      }
+    },
+    refetchInterval: 5000,
+  });
+
+  const { data: deferralStatus } = useQuery({
+    queryKey: ['rainDeferralStatus', DEVICE_ID],
+    queryFn: async () => {
+      try {
+        const res = await apiClient.get(`/telemetry/rain-deferral-status/${DEVICE_ID}`);
         return res.data;
       } catch (e) {
         return null;
@@ -318,6 +331,33 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ── Rain Deferral Alert ──────────────────────────────────────────────── */}
+      {deferralStatus?.showBanner && (
+        <div className="bg-blue-50/50 dark:bg-blue-950/40 border border-blue-500/50 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+              <CloudRain className="w-6 h-6 text-blue-500" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-blue-900 dark:text-blue-200">AI Rain Deferral Active</h3>
+              <p className="text-blue-700 dark:text-blue-300 text-sm mt-0.5">
+                Water pump needs to be activated (Moisture is below {pumpData?.moisture_threshold_low ?? 20}%). <br className="hidden sm:block"/>
+                But didn't activate because of rain prediction.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link href="/system-control" className="px-4 py-2 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-800/60 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800">
+              Manage Controls
+            </Link>
+            <div className="px-4 py-2 bg-white dark:bg-slate-900/60 rounded-lg border border-blue-100 dark:border-blue-900 shadow-sm flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Monitoring Weather</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Local Microclimate (Weather Station) ───────────────────────── */}
       <section>
         <div className="flex items-center gap-3 mb-4">
@@ -330,7 +370,7 @@ export default function Dashboard() {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             icon={CloudSun} label="Light Condition"
             value={LATEST.light_condition} unit=""
@@ -382,7 +422,7 @@ export default function Dashboard() {
         </div>
 
         {latestReading ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             icon={Droplets} label="Soil Moisture"
             value={latestReading.moisture?.toFixed(1) ?? '—'} unit="%"
@@ -445,7 +485,7 @@ export default function Dashboard() {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <div className="rounded-xl p-4 flex flex-col justify-center border border-border bg-card shadow-sm">
             <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5"><Droplets className="w-3 h-3"/> Water</p>
             <p className="text-sm font-bold">2 hours ago</p>
@@ -575,7 +615,7 @@ export default function Dashboard() {
 
       {/* ── Floating AI Assistant Popup ────────────────────────────────────── */}
       {isChatOpen && (
-        <div className="fixed bottom-24 right-8 z-50 w-80 md:w-96 bg-white dark:bg-slate-900 rounded-[1.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-100 dark:border-slate-800 flex flex-col overflow-hidden animate-fade-in" style={{ height: '500px', maxHeight: '70vh' }}>
+        <div className="fixed bottom-24 right-4 left-4 sm:left-auto sm:right-8 z-50 w-auto sm:w-80 md:w-96 bg-white dark:bg-slate-900 rounded-[1.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-100 dark:border-slate-800 flex flex-col overflow-hidden animate-fade-in" style={{ height: '500px', maxHeight: '70vh' }}>
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4" style={{ background: 'linear-gradient(135deg, hsl(142, 65%, 28%), hsl(162, 55%, 40%))', color: 'white' }}>
             <div className="flex items-center gap-3">

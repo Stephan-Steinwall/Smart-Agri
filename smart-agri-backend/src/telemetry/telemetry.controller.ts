@@ -1,9 +1,12 @@
-import { Controller, Get, Param, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Post, Body, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
 import { TelemetryService } from './telemetry.service';
 import { AuthGuard } from '../auth/auth.guard';
 import {
+  ForgotPasswordDto,
   LoginDto,
   ResendOtpDto,
+  ResetPasswordDto,
   SendSmsDto,
   UpdateAccountDto,
   UpdateSystemControlPasswordDto,
@@ -38,6 +41,18 @@ export class TelemetryController {
   @Get('dashboard-history/:deviceId')
   getDashboardHistory(@Param('deviceId') deviceId: string) {
     return this.telemetryService.getDashboardHistory(deviceId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('rain-deferral-status/:deviceId')
+  getRainDeferralStatus(@Param('deviceId') deviceId: string) {
+    return this.telemetryService.getRainDeferralStatus(deviceId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('mute-buzzer/:deviceId')
+  muteBuzzer(@Param('deviceId') deviceId: string) {
+    return this.telemetryService.muteBuzzer(deviceId);
   }
 
   @UseGuards(AuthGuard)
@@ -80,6 +95,12 @@ export class TelemetryController {
   @Get('pump-logs/:deviceId')
   async getPumpLogs(@Param('deviceId') deviceId: string) {
     return this.telemetryService.getPumpLogs(deviceId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('pump-logs/delete')
+  async deletePumpLogs(@Body('logIds') logIds: string[]) {
+    return this.telemetryService.deletePumpLogs(logIds);
   }
 
   @UseGuards(AuthGuard)
@@ -132,12 +153,31 @@ export class TelemetryController {
     return this.telemetryService.resendOtp(body.emailOrUsername);
   }
 
+  @Post('auth/forgot-password')
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
+    return this.telemetryService.forgotPassword(body.emailOrUsername);
+  }
+
+  @Post('auth/reset-password')
+  async resetPassword(@Body() body: ResetPasswordDto) {
+    return this.telemetryService.resetPassword(
+      body.emailOrUsername,
+      body.code,
+      body.newPassword,
+    );
+  }
+
   // ── Session-required account/security routes ──
 
   @UseGuards(AuthGuard)
   @Post('auth/update-account')
-  async updateAccount(@Body() body: UpdateAccountDto) {
-    return this.telemetryService.updateAccount(body);
+  async updateAccount(@Body() body: UpdateAccountDto, @Req() req: Request) {
+    const caller = (req as any).user as {
+      sub?: string | number;
+      email?: string;
+      username?: string;
+    };
+    return this.telemetryService.updateAccount(caller, body);
   }
 
   @UseGuards(AuthGuard)

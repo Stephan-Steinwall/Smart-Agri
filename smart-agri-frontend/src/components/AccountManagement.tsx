@@ -254,13 +254,17 @@ export default function AccountManagement() {
     const fullPhone = `${countryCode}${cleanDigits}`;
 
     try {
-      const res = await apiClient.post('/telemetry/auth/update-account', {
+      const payload: any = {
         oldEmail: originalEmail,
         email: email.trim(),
         username: username.trim(),
         phone: fullPhone,
         twoFactorEnabled: twoFactor,
-      });
+      };
+      if (showAccountPassword && newAccountPassword) {
+        payload.newPassword = newAccountPassword;
+      }
+      const res = await apiClient.post('/telemetry/auth/update-account', payload);
 
       if (res.data && res.data.success) {
         if (typeof window !== 'undefined') {
@@ -274,49 +278,24 @@ export default function AccountManagement() {
           localStorage.setItem('userAccount', JSON.stringify(updatedUser));
         }
         setOriginalEmail(email.trim());
-        setSaveMessage('✓ Account & phone number updated successfully in user_accounts!');
-        setIsSaving(false);
+        if (showAccountPassword) {
+          setSaveMessage('✓ Account, phone number & password updated successfully!');
+          setNewAccountPassword('');
+          setConfirmAccountPassword('');
+          setShowAccountPassword(false);
+        } else {
+          setSaveMessage('✓ Account & phone number updated successfully!');
+        }
         setTimeout(() => setSaveMessage(''), 4000);
-        return;
+      } else {
+        setSaveMessage(`Error: ${res.data?.message || 'Failed to update account.'}`);
       }
-    } catch (err) {
-      console.warn("Backend update API failed, attempting direct Supabase update...", err);
+    } catch (err: any) {
+      console.error('Failed to update account', err);
+      setSaveMessage(`Error: ${err?.response?.data?.message || 'Failed to reach the server. Please try again.'}`);
+    } finally {
+      setIsSaving(false);
     }
-
-    try {
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (SUPABASE_URL && SUPABASE_KEY) {
-        const mod = await import('@supabase/supabase-js');
-        const supabase = mod.createClient(SUPABASE_URL, SUPABASE_KEY);
-        await supabase
-          .from('user_accounts')
-          .update({
-            username: username.trim(),
-            email: email.trim(),
-            phone: fullPhone,
-          })
-          .eq('email', originalEmail);
-      }
-    } catch (err) {}
-
-    if (typeof window !== 'undefined') {
-      const existing = localStorage.getItem('userAccount');
-      let parsed = {};
-      try { if (existing) parsed = JSON.parse(existing); } catch(e){}
-      const updated = {
-        ...parsed,
-        username: username.trim(),
-        email: email.trim(),
-        phone: fullPhone,
-        phone_number: fullPhone,
-      };
-      localStorage.setItem('userAccount', JSON.stringify(updated));
-    }
-    setOriginalEmail(email.trim());
-    setIsSaving(false);
-    setSaveMessage('✓ Settings & phone number saved successfully!');
-    setTimeout(() => setSaveMessage(''), 4000);
   };
 
   const handleLogout = () => {
@@ -325,7 +304,7 @@ export default function AccountManagement() {
       sessionStorage.removeItem('systemControlUnlocked');
     }
     setIsOpen(false);
-    router.replace('/login');
+    router.replace('/');
   };
 
   return (
@@ -495,14 +474,14 @@ export default function AccountManagement() {
                     <Phone className="w-3.5 h-3.5 text-primary" /> SMS Alert Number
                   </span>
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <select
                     value={countryCode}
                     onChange={(e) => {
                       setCountryCode(e.target.value);
                       setPhoneNumber(formatNumber(phoneNumber, e.target.value));
                     }}
-                    className="px-3 py-2.5 rounded-xl bg-muted/80 border border-border text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all cursor-pointer min-w-[120px]"
+                    className="px-3 py-2.5 rounded-xl bg-muted/80 border border-border text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all cursor-pointer w-[110px] sm:w-[130px] shrink-0"
                   >
                     {COUNTRY_CODES.map((c) => (
                       <option key={c.code} value={c.code} className="bg-card text-foreground font-semibold">
@@ -511,7 +490,7 @@ export default function AccountManagement() {
                     ))}
                   </select>
 
-                  <div className="relative flex-1">
+                  <div className="relative flex-1 min-w-0">
                     <input
                       type="text"
                       value={phoneNumber}

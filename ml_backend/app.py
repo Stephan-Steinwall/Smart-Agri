@@ -1,3 +1,4 @@
+import logging
 import os
 import joblib
 import pandas as pd
@@ -8,6 +9,9 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("agribot.crop_recommendation")
 
 MODEL_FILE = os.getenv("MODEL_FILE", "models/crop_reference_model.joblib")
 ALLOWED_ORIGINS_STR = os.getenv(
@@ -25,7 +29,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    # No cookies/session auth is used anywhere in this API (pure JSON
+    # in/out), so credentials aren't needed — leaving this off narrows
+    # the blast radius if ALLOWED_ORIGINS is ever misconfigured.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -114,12 +121,24 @@ async def evaluate_soil(request: EvaluateRequest):
                 detail="Agronomic reference model is not loaded or trained yet. Please train the model."
             )
 
-    model = model_package["model"]
-    features = model_package["features"]
-    classes = model_package["classes"]
     model_version = model_package.get("model_version", "reference_rf_v1")
     training_origin = model_package.get("training_origin", "reference_generated")
     warning_msg = model_package.get("warning", "PROTOTYPE WARNING: Trained from generated agronomic ranges.")
+
+    try:
+        # features/classes are read inside the try block so a malformed or
+        # differently-packaged model file (missing these keys) is caught by
+        # the same error handling as every other failure mode below, instead
+        # of raising an unhandled KeyError that bypasses it entirely.
+        model = model_package["model"]
+        features = model_package["features"]
+        classes = model_package["classes"]
+    except KeyError as e:
+        logger.error(f"Model package is missing expected key: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agronomic reference model is not loaded correctly. Please retrain the model.",
+        ) from e
 
     if request.selected_crop not in classes:
         raise HTTPException(
@@ -187,9 +206,10 @@ async def evaluate_soil(request: EvaluateRequest):
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Unexpected error during /evaluate")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during soil evaluation: {str(e)}"
+            detail="An internal error occurred during soil evaluation. Please try again."
         ) from e
 
 @app.post("/rank", response_model=RankResponse, tags=["Evaluation"])
@@ -208,14 +228,19 @@ async def rank_crops(request: RankRequest):
                 detail="Agronomic reference model is not loaded or trained yet. Please train the model."
             )
 
-    model = model_package["model"]
-    features = model_package["features"]
-    classes = model_package["classes"]
     model_version = model_package.get("model_version", "reference_rf_v1")
     training_origin = model_package.get("training_origin", "reference_generated")
     warning_msg = model_package.get("warning", "PROTOTYPE WARNING: Trained from generated agronomic ranges.")
 
     try:
+        # features/classes are read inside the try block so a malformed or
+        # differently-packaged model file (missing these keys) is caught by
+        # the same error handling as every other failure mode below, instead
+        # of raising an unhandled KeyError that bypasses it entirely.
+        model = model_package["model"]
+        features = model_package["features"]
+        classes = model_package["classes"]
+
         input_data = pd.DataFrame([{
             "soil_ph": request.soil_ph,
             "temperature_c": request.temperature_c,
@@ -238,8 +263,17 @@ async def rank_crops(request: RankRequest):
             warning=warning_msg
         )
 
+    except HTTPException:
+        raise
+    except KeyError as e:
+        logger.error(f"Model package is missing expected key: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agronomic reference model is not loaded correctly. Please retrain the model.",
+        ) from e
     except Exception as e:
+        logger.exception("Unexpected error during /rank")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while ranking crops: {str(e)}"
+            detail="An internal error occurred while ranking crops. Please try again."
         ) from e

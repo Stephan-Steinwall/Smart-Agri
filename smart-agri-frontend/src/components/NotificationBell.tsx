@@ -138,7 +138,7 @@ export default function NotificationBell() {
         align="end"
         className="p-0 overflow-hidden rounded-2xl"
         style={{
-          width: '320px',
+          width: 'min(320px, calc(100vw - 2rem))',
           background: 'var(--card)',
           border: '1px solid var(--border)',
           boxShadow: 'var(--shadow-hover)',

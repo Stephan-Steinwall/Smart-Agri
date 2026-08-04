@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { SensorReading } from './entities/sensor-reading.entity';
@@ -16,11 +17,34 @@ export class TelemetryService {
     string,
     { code: string; user: any; expiresAt: number; attempts: number }
   >();
+  private passwordResetSessions = new Map<
+    string,
+    { code: string; user: any; expiresAt: number; attempts: number }
+  >();
 
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly jwtService: JwtService,
   ) {}
+
+  // These session maps have no other cleanup path — an abandoned login OTP,
+  // an abandoned password reset, or an expired lockout otherwise stays in
+  // memory for the lifetime of the process. Sweep expired entries on a
+  // timer so long-running deployments don't grow this unbounded.
+  @Interval(10 * 60 * 1000)
+  private sweepExpiredSessions() {
+    const now = Date.now();
+    for (const [key, session] of this.otpSessions) {
+      if (now > session.expiresAt) this.otpSessions.delete(key);
+    }
+    for (const [key, session] of this.passwordResetSessions) {
+      if (now > session.expiresAt) this.passwordResetSessions.delete(key);
+    }
+    for (const [key, record] of this.loginAttempts) {
+      if (record.lockedUntil > 0 && record.lockedUntil < now)
+        this.loginAttempts.delete(key);
+    }
+  }
 
   private isBcryptHash(value: string): boolean {
     return /^\$2[aby]\$/.test(value);
@@ -61,6 +85,17 @@ export class TelemetryService {
     }
 
     return true;
+  }
+
+  // Masks a phone number for client display without ever sending the raw
+  // digits over the wire (mirrors the frontend's cosmetic maskPhone()).
+  private maskPhoneForResponse(phone: string): string {
+    if (!phone) return '•••• ••• ••••';
+    const clean = String(phone).trim();
+    if (clean.length <= 4) return '••••';
+    const last4 = clean.slice(-4);
+    const start = clean.startsWith('+') ? clean.slice(0, 3) : '';
+    return `${start} ••• ••• ${last4}`.trim();
   }
 
   private clampScore(value: number): number {
@@ -153,7 +188,67 @@ export class TelemetryService {
       receiverUptimeMinutes: row.receiver_uptime_minutes ?? null,
       receiverUptimeSeconds: row.receiver_uptime_seconds ?? null,
       soilHealthScore: this.calculateSoilHealthScore(row),
+      latitude: row.latitude ?? null,
+      longitude: row.longitude ?? null,
+      gpsAltitudeM: row.gps_altitude_m ?? null,
+      gpsSatellites: row.gps_satellites ?? null,
+      gpsHdop: row.gps_hdop ?? null,
+      gpsValid: row.gps_valid ?? null,
+      gpsQualityAcceptable: row.gps_quality_acceptable ?? null,
     };
+  }
+
+  // Evaluates rain deferral strictly on the server-side to prevent UI mismatches
+  async getRainDeferralStatus(deviceId: string): Promise<{ showBanner: boolean }> {
+    const db = this.supabaseService.getClient();
+
+    // 1. Check latest telemetry safely without .single()
+    const { data: readingData, error: readingError } = await db
+      .from('latest_soil_reading')
+      .select('soil_moisture_percent')
+      .eq('device_id', deviceId)
+      .limit(1);
+    if (readingError) {
+      this.logger.warn(
+        `getRainDeferralStatus: failed to fetch latest_soil_reading for ${deviceId}: ${readingError.message}`,
+      );
+    }
+
+    const reading = readingData?.[0] || null;
+
+    // 2. Check system switches
+    const { data: switches, error: switchesError } = await db
+      .from('system_switches')
+      .select('moisture_threshold_low, pump_water')
+      .eq('device_id', deviceId)
+      .single();
+    if (switchesError && switchesError.code !== 'PGRST116') {
+      this.logger.warn(
+        `getRainDeferralStatus: failed to fetch system_switches for ${deviceId}: ${switchesError.message}`,
+      );
+    }
+
+    // 3. Check rain prediction
+    const { data: prediction, error: predictionError } = await db
+      .from('rain_predictions')
+      .select('will_rain')
+      .eq('device_id', deviceId)
+      .single();
+    if (predictionError && predictionError.code !== 'PGRST116') {
+      this.logger.warn(
+        `getRainDeferralStatus: failed to fetch rain_predictions for ${deviceId}: ${predictionError.message}`,
+      );
+    }
+
+    const moisture = reading?.soil_moisture_percent ?? 0;
+    const threshold = switches?.moisture_threshold_low ?? 0;
+    const willRain = prediction?.will_rain ?? false;
+    const isPumpOn = switches?.pump_water ?? false;
+
+    // Show banner if water is below threshold AND it will rain AND pump is currently OFF
+    const showBanner = (moisture < threshold) && willRain && !isPumpOn;
+
+    return { showBanner };
   }
 
   // Get the absolute newest reading for our Live Cards
@@ -163,7 +258,7 @@ export class TelemetryService {
       .from('latest_soil_reading')
       .select('*')
       .eq('device_id', deviceId)
-      .single();
+      .limit(1);
 
     if (error) {
       this.logger.error(
@@ -172,7 +267,10 @@ export class TelemetryService {
       return null;
     }
 
-    return this.mapSupabaseToEntity(data);
+    if (data && data.length > 0) {
+      return this.mapSupabaseToEntity(data[0]);
+    }
+    return null;
   }
 
   // Get historical data for the charts (e.g., last 50 readings)
@@ -200,15 +298,14 @@ export class TelemetryService {
     ).reverse();
   }
 
-  // Get data specifically for the new dashboard from soil_sensor_readings table
+  // Get data specifically for the new dashboard from soil_readings table
   async getDashboardHistory(deviceId: string): Promise<any[]> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('soil_sensor_readings')
       .select('*')
       .eq('device_id', deviceId)
-      .order('created_at', { ascending: false })
-      .limit(50);
+      .order('created_at', { ascending: false });
 
     if (error) {
       if (error.code !== 'PGRST116') {
@@ -221,27 +318,23 @@ export class TelemetryService {
 
     // Map to the existing frontend structure so we don't break the UI
     return (data || [])
-      .map((row, index) => {
-        // Pseudo-random offset based on index so markers spread over the map
-        const latOffset = (index % 5 - 2) * 0.0005;
-        const lngOffset = ((index * 3) % 5 - 2) * 0.0005;
-        
+      .map((row) => {
         return {
           id: row.id,
           device_id: row.device_id,
-          moisture: row.soil_moisture_percent,
-          temperature: row.soil_temperature_celsius,
-          ph: row.soil_ph,
-          electricalConductivity: row.conductivity,
-          nitrogen: row.nitrogen,
-          phosphorus: row.phosphorus,
-          potassium: row.potassium,
-          tds: row.tds_mg_l,
-          salinity: row.salinity,
-          time: row.created_at,
-          latitude: (Number(process.env.FARM_LATITUDE) || 6.9271) + latOffset,
-          longitude: (Number(process.env.FARM_LONGITUDE) || 79.8612) + lngOffset,
-          gps_satellites: 8,
+          moisture: row.soil_moisture_percent ?? row.moisture ?? row.soil_moisture ?? null,
+          temperature: row.soil_temperature_celsius ?? row.temperature ?? row.soil_temperature ?? null,
+          ph: row.soil_ph ?? row.ph ?? null,
+          electricalConductivity: row.conductivity ?? row.ec_levels ?? row.electrical_conductivity ?? row.soil_conductivity ?? null,
+          nitrogen: row.nitrogen ?? null,
+          phosphorus: row.phosphorus ?? null,
+          potassium: row.potassium ?? null,
+          tds: row.tds_mg_l ?? row.tds ?? null,
+          salinity: row.salinity ?? null,
+          time: row.created_at ?? row.timestamp ?? row.time,
+          latitude: row.latitude ?? (Number(process.env.FARM_LATITUDE) || 6.9271),
+          longitude: row.longitude ?? (Number(process.env.FARM_LONGITUDE) || 79.8612),
+          gps_satellites: row.gps_satellites ?? 8,
         };
       })
       .reverse();
@@ -343,6 +436,13 @@ export class TelemetryService {
         labelled_by: payload.labelled_by ?? payload.labelledBy ?? null,
         verified_by: payload.verified_by ?? payload.verifiedBy ?? null,
         verified_at: payload.verified_at ?? payload.verifiedAt ?? null,
+        latitude: payload.latitude ?? null,
+        longitude: payload.longitude ?? null,
+        gps_altitude_m: payload.gps_altitude_m ?? null,
+        gps_satellites: payload.gps_satellites ?? null,
+        gps_hdop: payload.gps_hdop ?? null,
+        gps_valid: payload.gps_valid ?? false,
+        gps_quality_acceptable: payload.gps_quality_acceptable ?? false,
       };
 
       // Table name contains spaces; supply the exact table name (Supabase client quotes internally)
@@ -461,6 +561,23 @@ export class TelemetryService {
     return data || [];
   }
 
+  async deletePumpLogs(logIds: string[]) {
+    if (!logIds || logIds.length === 0) return { success: true, count: 0 };
+    
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('pump_activation_logs')
+      .delete()
+      .in('session_id', logIds)
+      .select();
+
+    if (error) {
+      this.logger.error(`Error deleting pump logs: ${error.message}`);
+      throw new Error('Failed to delete pump logs');
+    }
+    return { success: true, count: data?.length || 0 };
+  }
+
   async getSystemSwitches(deviceId: string) {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -476,11 +593,19 @@ export class TelemetryService {
     if (data) {
       return {
         ...data,
+        pump_water: data.pump_water ?? false,
+        pump_nitrogen: data.pump_nitrogen ?? false,
+        pump_phosphorus: data.pump_phosphorus ?? false,
+        pump_potassium: data.pump_potassium ?? false,
         system_switch: data.system_switch ?? true,
-        ai_automation_enabled: data.ai_automation_enabled ?? true,
-        auto_grow_light_enabled: data.auto_grow_light_enabled ?? false,
         light_01: data.light_01 ?? false,
         light_02: data.light_02 ?? false,
+        pump_mister: data.pump_mister ?? false,
+        buzzer_active: data.buzzer_active ?? false,
+        rain_buzzer_enabled: data.rain_buzzer_enabled ?? true,
+        ai_automation_enabled: data.ai_automation_enabled ?? true,
+        auto_grow_light_enabled: data.auto_grow_light_enabled ?? false,
+        auto_mister_enabled: data.auto_mister_enabled ?? false,
         moisture_threshold_low: data.moisture_threshold_low ?? 20,
         moisture_threshold_high: data.moisture_threshold_high ?? 50,
         nitrogen_threshold_low: data.nitrogen_threshold_low ?? 30,
@@ -491,6 +616,7 @@ export class TelemetryService {
         potassium_threshold_high: data.potassium_threshold_high ?? 70,
         light_intensity_threshold_lux:
           data.light_intensity_threshold_lux ?? 5000,
+        humidity_threshold_percent: data.humidity_threshold_percent ?? 45,
       };
     }
 
@@ -503,6 +629,12 @@ export class TelemetryService {
       system_switch: true,
       light_01: false,
       light_02: false,
+      pump_mister: false,
+      buzzer_active: false,
+      rain_buzzer_enabled: true,
+      ai_automation_enabled: true,
+      auto_grow_light_enabled: false,
+      auto_mister_enabled: false,
       moisture_threshold_low: 20,
       moisture_threshold_high: 50,
       nitrogen_threshold_low: 30,
@@ -512,6 +644,7 @@ export class TelemetryService {
       potassium_threshold_low: 30,
       potassium_threshold_high: 70,
       light_intensity_threshold_lux: 5000,
+      humidity_threshold_percent: 45,
     };
   }
 
@@ -525,6 +658,8 @@ export class TelemetryService {
       'light_01',
       'light_02',
       'pump_mister',
+      'buzzer_active',
+      'rain_buzzer_enabled',
     ];
     if (!validColumns.includes(pumpName)) {
       throw new Error('Invalid pump name');
@@ -539,6 +674,8 @@ export class TelemetryService {
       })
       .eq('device_id', deviceId)
       .select();
+
+    let persisted = !updateError && !!updateData && updateData.length > 0;
 
     if (updateError) {
       this.logger.error(`Error updating pump switch: ${updateError.message}`);
@@ -556,7 +693,18 @@ export class TelemetryService {
         this.logger.error(
           `Error inserting pump switch: ${insertError.message}`,
         );
+      } else {
+        persisted = true;
       }
+    }
+
+    if (!persisted) {
+      return {
+        success: false,
+        pumpName,
+        state,
+        message: 'Failed to update system switch in the database.',
+      };
     }
 
     // --- pump_activation_logs Logic ---
@@ -566,18 +714,32 @@ export class TelemetryService {
         const client = this.supabaseService.getClient();
 
         if (state === true) {
-          // Start a new session
-          const { error: logError } = await client
+          // Only start a new session if one isn't already running for this
+          // pump — otherwise a duplicate "on" call (double-click, retry)
+          // leaves an orphaned running row with no end_time once the pump
+          // is eventually turned off (only the newest running row gets closed).
+          const { data: alreadyRunning } = await client
             .from('pump_activation_logs')
-            .insert({
-              session_id: randomUUID(),
-              device_id: deviceId,
-              pump_name: purePumpName,
-              start_time: new Date().toISOString(),
-              status: 'running',
-            });
-          if (logError)
-            this.logger.error(`Error starting pump log: ${logError.message}`);
+            .select('session_id')
+            .eq('device_id', deviceId)
+            .eq('pump_name', purePumpName)
+            .eq('status', 'running')
+            .limit(1)
+            .maybeSingle();
+
+          if (!alreadyRunning) {
+            const { error: logError } = await client
+              .from('pump_activation_logs')
+              .insert({
+                session_id: randomUUID(),
+                device_id: deviceId,
+                pump_name: purePumpName,
+                start_time: new Date().toISOString(),
+                status: 'running',
+              });
+            if (logError)
+              this.logger.error(`Error starting pump log: ${logError.message}`);
+          }
         } else {
           // Stop the currently running session
           const { data: runningSession, error: fetchError } = await client
@@ -623,6 +785,26 @@ export class TelemetryService {
   }
 
   async updateThresholds(deviceId: string, body: any) {
+    // A low threshold >= its high threshold makes the automation's ON
+    // (value < low) and OFF (value >= high) conditions simultaneously
+    // satisfiable, causing the pump/output to flap on every poll.
+    const thresholdPairs: [string, string][] = [
+      ['moisture_threshold_low', 'moisture_threshold_high'],
+      ['nitrogen_threshold_low', 'nitrogen_threshold_high'],
+      ['phosphorus_threshold_low', 'phosphorus_threshold_high'],
+      ['potassium_threshold_low', 'potassium_threshold_high'],
+    ];
+    for (const [lowKey, highKey] of thresholdPairs) {
+      const low = body[lowKey];
+      const high = body[highKey];
+      if (typeof low === 'number' && typeof high === 'number' && low >= high) {
+        return {
+          success: false,
+          message: `${lowKey.replace('_threshold_low', '')} low threshold (${low}) must be less than its high threshold (${high}).`,
+        };
+      }
+    }
+
     const { data: updateData, error: updateError } = await this.supabaseService
       .getClient()
       .from('system_switches')
@@ -636,6 +818,7 @@ export class TelemetryService {
         potassium_threshold_low: body.potassium_threshold_low,
         potassium_threshold_high: body.potassium_threshold_high,
         light_intensity_threshold_lux: body.light_intensity_threshold_lux,
+        humidity_threshold_percent: body.humidity_threshold_percent,
         updated_at: new Date().toISOString(),
       })
       .eq('device_id', deviceId)
@@ -714,35 +897,42 @@ export class TelemetryService {
       const matchVal =
         matchedUser.id ?? matchedUser.email ?? matchedUser.username;
 
-      if (password && dbPassword) {
-        const passwordOk = await this.verifyAndMaybeMigratePassword(
-          password,
-          String(dbPassword),
-          matchCol,
-          matchVal,
-          'user_password_hash',
-        );
+      // `password` is optional in the DTO so a missing/empty value produces
+      // this same "invalid password" response instead of a generic 400 —
+      // but it must NEVER be treated as "skip verification." Omitting it
+      // must not authenticate an account, including :NO_2FA accounts that
+      // otherwise get an instant JWT below.
+      const passwordOk = password
+        ? dbPassword
+          ? await this.verifyAndMaybeMigratePassword(
+              password,
+              String(dbPassword),
+              matchCol,
+              matchVal,
+              'user_password_hash',
+            )
+          : false
+        : false;
 
-        if (!passwordOk) {
-          // Record failed attempt
-          const count = (attemptRecord?.count || 0) + 1;
-          if (count >= 5) {
-            this.loginAttempts.set(cleanInput, {
-              count,
-              lockedUntil: Date.now() + 15 * 60 * 1000,
-            });
-            return {
-              success: false,
-              message:
-                'Too many failed login attempts. Account locked for 15 minutes.',
-            };
-          } else {
-            this.loginAttempts.set(cleanInput, { count, lockedUntil: 0 });
-            return {
-              success: false,
-              message: `Invalid password. ${5 - count} attempt(s) remaining before lockout.`,
-            };
-          }
+      if (!passwordOk) {
+        // Record failed attempt
+        const count = (attemptRecord?.count || 0) + 1;
+        if (count >= 5) {
+          this.loginAttempts.set(cleanInput, {
+            count,
+            lockedUntil: Date.now() + 15 * 60 * 1000,
+          });
+          return {
+            success: false,
+            message:
+              'Too many failed login attempts. Account locked for 15 minutes.',
+          };
+        } else {
+          this.loginAttempts.set(cleanInput, { count, lockedUntil: 0 });
+          return {
+            success: false,
+            message: `Invalid password. ${5 - count} attempt(s) remaining before lockout.`,
+          };
         }
       }
 
@@ -1030,16 +1220,173 @@ export class TelemetryService {
     };
   }
 
-  async updateAccount(body: {
-    email?: string;
-    oldEmail?: string;
-    fullName?: string;
-    username?: string;
-    phone?: string;
-    twoFactorEnabled?: boolean;
-  }) {
+  async forgotPassword(emailOrUsername: string) {
+    if (!emailOrUsername)
+      return { success: false, message: 'Email or username is required.' };
+
+    // Generic response used for every outcome that must not reveal whether
+    // an account exists or is disabled, to prevent account enumeration.
+    const genericMessage =
+      'If an account with that email or username exists, a verification code has been dispatched to the registered device.';
+
+    try {
+      const cleanInput = emailOrUsername.trim().toLowerCase();
+      // The session is always keyed by exactly what the caller submitted
+      // (not the account's canonical email) so subsequent verify/resend
+      // calls — which only ever have access to the masked response below,
+      // never the real email/username — can reliably find it again.
+      const sessionKey = cleanInput;
+
+      const client = this.supabaseService.getClient();
+      const { data: allUsers, error } = await client
+        .from('user_accounts')
+        .select('*');
+      if (error) {
+        this.logger.warn(`Error querying user_accounts: ${error.message}`);
+        return { success: false, message: `Database error: ${error.message}` };
+      }
+
+      const matchedUser = (allUsers || []).find((u) => {
+        const emailMatch =
+          u.email && String(u.email).trim().toLowerCase() === cleanInput;
+        const userMatch =
+          u.username && String(u.username).trim().toLowerCase() === cleanInput;
+        return emailMatch || userMatch;
+      });
+
+      // Neither "not found" nor "disabled" is disclosed to the caller —
+      // both look identical to a genuine success from the outside.
+      if (!matchedUser || matchedUser.account_status === 'disabled') {
+        return { success: true, message: genericMessage };
+      }
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+      this.passwordResetSessions.set(sessionKey, {
+        code,
+        user: matchedUser,
+        expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes expiration
+        attempts: 0,
+      });
+
+      const userPhone =
+        matchedUser.phone ||
+        matchedUser.phone_number ||
+        matchedUser.mobile ||
+        '+1 (555) 382-9102';
+
+      // Password reset always requires the code, even for accounts that
+      // opted out of 2FA convenience at login via the :NO_2FA suffix.
+      const cleanPhone = userPhone.replace(':NO_2FA', '');
+
+      this.sendSms(cleanPhone, code, matchedUser.email);
+
+      return {
+        success: true,
+        message: genericMessage,
+        maskedPhone: this.maskPhoneForResponse(cleanPhone),
+      };
+    } catch (err: any) {
+      this.logger.error(`Forgot password error: ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  }
+
+  async resetPassword(
+    emailOrUsername: string,
+    code: string,
+    newPassword: string,
+  ) {
+    if (!emailOrUsername || !code || !newPassword)
+      return {
+        success: false,
+        message: 'Email/username, code, and new password are required.',
+      };
+    const sessionKey = emailOrUsername.toString().toLowerCase().trim();
+    const session = this.passwordResetSessions.get(sessionKey);
+
+    if (!session) {
+      return {
+        success: false,
+        message:
+          'No active password reset session found. Please click Forgot Password again.',
+      };
+    }
+
+    if (Date.now() > session.expiresAt) {
+      this.passwordResetSessions.delete(sessionKey);
+      return {
+        success: false,
+        message:
+          'Password reset code has expired (5-minute limit). Please click Forgot Password again.',
+      };
+    }
+
+    if (session.attempts >= 5) {
+      this.passwordResetSessions.delete(sessionKey);
+      return {
+        success: false,
+        message:
+          'Too many incorrect attempts. For security, please click Forgot Password again.',
+      };
+    }
+
+    if (String(session.code).trim() !== String(code).trim()) {
+      session.attempts += 1;
+      return {
+        success: false,
+        message: `Invalid reset code. ${5 - session.attempts} attempt(s) remaining.`,
+      };
+    }
+
+    try {
+      const user = session.user;
+      const matchCol = user.id != null ? 'id' : user.email ? 'email' : 'username';
+      const matchVal = user.id ?? user.email ?? user.username;
+      const newHash = await bcrypt.hash(newPassword, 10);
+
+      const { error: updateErr } = await this.supabaseService
+        .getClient()
+        .from('user_accounts')
+        .update({
+          user_password_hash: newHash,
+          updated_at: new Date().toISOString(),
+        })
+        .eq(matchCol, matchVal);
+
+      if (updateErr) {
+        this.logger.error(
+          `Error updating user_password_hash during reset: ${updateErr.message}`,
+        );
+        return { success: false, message: `Database error: ${updateErr.message}` };
+      }
+
+      this.passwordResetSessions.delete(sessionKey);
+      this.loginAttempts.delete(sessionKey);
+
+      return {
+        success: true,
+        message: 'Password has been reset successfully. Please log in with your new password.',
+      };
+    } catch (err: any) {
+      this.logger.error(`Reset password error: ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  }
+
+  async updateAccount(
+    caller: { sub?: string | number; email?: string; username?: string },
+    body: {
+      email?: string;
+      fullName?: string;
+      username?: string;
+      phone?: string;
+      twoFactorEnabled?: boolean;
+      newPassword?: string;
+    },
+  ) {
     this.logger.log(
-      `[AUTH SERVICE] Updating user account for ${body.oldEmail || body.email || body.username}`,
+      `[AUTH SERVICE] Updating user account for ${caller.email || caller.username}`,
     );
     try {
       const client = this.supabaseService.getClient();
@@ -1053,32 +1400,27 @@ export class TelemetryService {
         };
       }
 
-      const cleanOld = body.oldEmail ? body.oldEmail.trim().toLowerCase() : '';
-      const cleanEmail = body.email ? body.email.trim().toLowerCase() : '';
-      const cleanUser = body.username ? body.username.trim().toLowerCase() : '';
+      // Resolve the target account strictly from the authenticated caller's
+      // verified JWT identity — never from attacker-suppliable body fields —
+      // so a valid session can only ever modify the account it belongs to.
+      const callerEmail = caller.email ? caller.email.trim().toLowerCase() : '';
+      const callerUsername = caller.username
+        ? caller.username.trim().toLowerCase()
+        : '';
 
-      let target = allUsers.find((u: any) => {
+      const target = allUsers.find((u: any) => {
         const uEmail = u.email ? String(u.email).trim().toLowerCase() : '';
         const uUser = u.username ? String(u.username).trim().toLowerCase() : '';
-        const uUserEmail = u.user_email
-          ? String(u.user_email).trim().toLowerCase()
-          : '';
         return (
-          (cleanOld && (uEmail === cleanOld || uUserEmail === cleanOld)) ||
-          (cleanEmail &&
-            (uEmail === cleanEmail || uUserEmail === cleanEmail)) ||
-          (cleanUser && uUser === cleanUser)
+          (callerEmail && uEmail === callerEmail) ||
+          (callerUsername && uUser === callerUsername)
         );
       });
-
-      if (!target && allUsers.length === 1) {
-        target = allUsers[0];
-      }
 
       if (!target) {
         return {
           success: false,
-          message: 'Matching user account not found in database.',
+          message: 'Authenticated account not found in database.',
         };
       }
 
@@ -1109,6 +1451,9 @@ export class TelemetryService {
         ) {
           updatePayload.phone = finalPhone;
         }
+      }
+      if (body.newPassword) {
+        updatePayload.user_password_hash = await bcrypt.hash(body.newPassword, 10);
       }
       if ('updated_at' in target)
         updatePayload.updated_at = new Date().toISOString();
@@ -1410,21 +1755,34 @@ export class TelemetryService {
     phosphorus_threshold_high: number;
     potassium_threshold_low: number;
     potassium_threshold_high: number;
+    [key: string]: any; // To allow extra fields to be passed but ignored
   }) {
+    const insertPayload = {
+      preset_name: payload.preset_name,
+      moisture_threshold_low: payload.moisture_threshold_low,
+      moisture_threshold_high: payload.moisture_threshold_high,
+      nitrogen_threshold_low: payload.nitrogen_threshold_low,
+      nitrogen_threshold_high: payload.nitrogen_threshold_high,
+      phosphorus_threshold_low: payload.phosphorus_threshold_low,
+      phosphorus_threshold_high: payload.phosphorus_threshold_high,
+      potassium_threshold_low: payload.potassium_threshold_low,
+      potassium_threshold_high: payload.potassium_threshold_high,
+    };
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('custom_threshold_presets')
-      .insert(payload)
+      .insert(insertPayload)
       .select()
       .single();
 
     if (error) {
       if (error.code === '23505') {
         // unique violation
-        throw new Error('A preset with this name already exists.');
+        throw new BadRequestException('A preset with this name already exists.');
       }
       this.logger.error(`Error saving custom preset: ${error.message}`);
-      throw new Error('Failed to save custom preset');
+      throw new InternalServerErrorException(`Failed to save custom preset: ${error.message}`);
     }
 
     return data;
@@ -1509,5 +1867,22 @@ export class TelemetryService {
     }
 
     return { success: true, auto_mister_enabled: enabled };
+  }
+
+  // --- Buzzer Mute Logic ---
+  private mutedBuzzerDevices = new Set<string>();
+
+  async muteBuzzer(deviceId: string) {
+    this.mutedBuzzerDevices.add(deviceId);
+    await this.toggleSystemSwitch(deviceId, 'buzzer_active', false);
+    return { success: true, muted: true };
+  }
+
+  isBuzzerMuted(deviceId: string): boolean {
+    return this.mutedBuzzerDevices.has(deviceId);
+  }
+
+  resetBuzzerMute(deviceId: string) {
+    this.mutedBuzzerDevices.delete(deviceId);
   }
 }

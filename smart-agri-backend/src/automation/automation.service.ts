@@ -11,6 +11,7 @@ const WEATHER_DEVICE_ID = 'esp32_weather_01';
 export class AutomationService {
   private readonly logger = new Logger(AutomationService.name);
   private rainPredictionInFlight = false;
+  private buzzerTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly supabaseService: SupabaseService,
@@ -25,22 +26,22 @@ export class AutomationService {
 
     try {
       // 1. Get latest readings
-      const { data: latestReading, error: readingsError } =
+      const { data: readingData, error: readingsError } =
         await this.supabaseService
           .getClient()
           .from('soil_sensor_readings')
-          .select('soil_moisture_percent, nitrogen, phosphorus, potassium')
+          .select('*')
           .eq('device_id', deviceId)
           .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .limit(1);
 
-      if (readingsError || !latestReading) return;
+      if (readingsError || !readingData || readingData.length === 0) return;
+      const latestReading = readingData[0];
 
-      const moisture = latestReading.soil_moisture_percent;
-      const nitrogen = latestReading.nitrogen;
-      const phosphorus = latestReading.phosphorus;
-      const potassium = latestReading.potassium;
+      const moisture = latestReading.soil_moisture_percent ?? latestReading.moisture ?? latestReading.soil_moisture ?? 0;
+      const nitrogen = latestReading.nitrogen ?? 0;
+      const phosphorus = latestReading.phosphorus ?? 0;
+      const potassium = latestReading.potassium ?? 0;
 
       // 2. Get rain prediction
       const { data: rainData } = await this.supabaseService
@@ -64,6 +65,28 @@ export class AutomationService {
         return;
       }
 
+      // Self-heal: if the DB says the buzzer is active but this process has
+      // no live shutoff timer for it (e.g. a restart/crash happened during
+      // the 15s window), the setTimeout that would have turned it off was
+      // lost with the old process — clear it directly so it can't stay on
+      // indefinitely with no other code path able to reset it.
+      if (settings.buzzer_active && !this.buzzerTimers.has(deviceId)) {
+        this.logger.warn(
+          `[Auto-Control] buzzer_active was stuck ON for ${deviceId} with no active shutoff timer (likely a restart mid-alert) — clearing it.`,
+        );
+        await this.telemetryService.toggleSystemSwitch(
+          deviceId,
+          'buzzer_active',
+          false,
+        );
+        settings.buzzer_active = false;
+      }
+
+      // If the rain-blocking condition is no longer active, reset the buzzer mute flag
+      if (!(moisture < settings.moisture_threshold_low && willRain && !settings.pump_water)) {
+        this.telemetryService.resetBuzzerMute(deviceId);
+      }
+
       // 4. Automation logic - Water
       if (
         moisture < settings.moisture_threshold_low &&
@@ -84,9 +107,39 @@ export class AutomationService {
           `Soil moisture dropped to ${moisture.toFixed(0)}%. Auto-irrigation started.`,
         );
       } else if (
+        moisture < settings.moisture_threshold_low &&
+        willRain &&
+        !settings.pump_water
+      ) {
+        // Rain prediction is blocking irrigation!
+        // Activate buzzer for 15 seconds if it hasn't been muted by the user AND the feature is enabled
+        if (settings.rain_buzzer_enabled && !settings.buzzer_active && !this.telemetryService.isBuzzerMuted(deviceId)) {
+          this.logger.log(`[Auto-Control] Irrigation blocked by rain prediction. Activating buzzer for 15s.`);
+          await this.telemetryService.toggleSystemSwitch(
+            deviceId,
+            'buzzer_active',
+            true,
+          );
+
+          // Turn off buzzer after 15 seconds
+          const buzzerTimer = setTimeout(async () => {
+            this.buzzerTimers.delete(deviceId);
+            await this.telemetryService.toggleSystemSwitch(
+              deviceId,
+              'buzzer_active',
+              false,
+            );
+            this.logger.log(`[Auto-Control] Buzzer deactivated after 15s.`);
+          }, 15000);
+          this.buzzerTimers.set(deviceId, buzzerTimer);
+        }
+      } else if (
         moisture >= settings.moisture_threshold_high &&
         settings.pump_water
       ) {
+        // If the rain condition clears or moisture goes high, reset the mute flag!
+        this.telemetryService.resetBuzzerMute(deviceId);
+
         this.logger.log(
           `[Auto-Control] Moisture ${moisture}% >= ${settings.moisture_threshold_high}%. Turning WATER pump OFF.`,
         );

@@ -30,4 +30,13 @@ export interface SensorReading {
 
   // Derived soil health
   soilHealthScore: number | null;
+
+  // GPS Location
+  latitude?: number | null;
+  longitude?: number | null;
+  gpsAltitudeM?: number | null;
+  gpsSatellites?: number | null;
+  gpsHdop?: number | null;
+  gpsValid?: boolean | null;
+  gpsQualityAcceptable?: boolean | null;
 }

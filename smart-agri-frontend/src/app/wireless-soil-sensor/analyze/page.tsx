@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
 import Link from 'next/link';
-import { ArrowLeft, Activity, Battery, Beaker, CheckCircle2, ChevronDown, Droplets, FlaskConical, Leaf, SignalHigh, Sprout, Thermometer, Wifi, Zap } from 'lucide-react';
+import { ArrowLeft, Activity, Battery, Beaker, CheckCircle2, ChevronDown, Droplets, FlaskConical, Leaf, SignalHigh, Sprout, Thermometer, Wifi, Zap, MapPin, Satellite, Mountain, Target } from 'lucide-react';
 import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { SUPPORTED_CROPS } from '@/lib/constants';
 
@@ -55,6 +55,8 @@ type SavedAnalysis = {
   createdAt: string;
   soilMetrics: SoilMetrics;
   cropRecommendation: string;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 function SensorCard({ icon: Icon, label, value, unit, color, bgColor }: { icon: React.ElementType; label: string; value: string | number; unit?: string; color: string; bgColor: string; }) {
@@ -318,6 +320,8 @@ export default function AnalyzeDataPage() {
             tds: row.tds,
             salinity: row.salinity,
           },
+          latitude: row.latitude ?? null,
+          longitude: row.longitude ?? null,
           cropRecommendation: row.recommended_crop || 'No crop recommendation generated'
         }));
         setSavedAnalyses(mapped);
@@ -342,29 +346,40 @@ export default function AnalyzeDataPage() {
 
     let channel: any = null;
     let supabase: any = null;
+    // Guards against the component unmounting before the async setup below
+    // resolves — without this, the cleanup function below runs while
+    // `channel` is still null (subscribing nothing), and the channel that
+    // finishes subscribing afterward is never unsubscribed by anything.
+    let cancelled = false;
 
     (async () => {
       try {
         // @ts-ignore - dynamic import may be unavailable during build if package isn't installed
         const mod = await import('@supabase/supabase-js');
+        if (cancelled) return;
         supabase = mod.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        channel = supabase.channel('realtime-wireless-soil');
+        const ch = supabase.channel('realtime-wireless-soil');
 
         const handleChange = () => {
           queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorLatest', DEVICE_ID] });
           queryClient.invalidateQueries({ queryKey: ['wirelessSoilSensorAnalysis', DEVICE_ID] });
         };
 
-        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'latest_soil_reading', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
+        ch.on('postgres_changes', { event: '*', schema: 'public', table: 'latest_soil_reading', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
           handleChange();
         });
 
-        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'soil_readings', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
+        ch.on('postgres_changes', { event: '*', schema: 'public', table: 'soil_readings', filter: `device_id=eq.${DEVICE_ID}` }, (_payload: any) => {
           handleChange();
         });
 
-        await channel.subscribe();
+        await ch.subscribe();
+        if (cancelled) {
+          try { ch.unsubscribe(); } catch { /* ignore */ }
+          return;
+        }
+        channel = ch;
       } catch (err) {
         // If supabase isn't available or subscription fails, fall back to polling
         // eslint-disable-next-line no-console
@@ -373,6 +388,7 @@ export default function AnalyzeDataPage() {
     })();
 
     return () => {
+      cancelled = true;
       try {
         if (channel && typeof channel.unsubscribe === 'function') {
           channel.unsubscribe();
@@ -455,6 +471,11 @@ export default function AnalyzeDataPage() {
     setSelectedIds((current) => {
       if (current.includes(id)) {
         return current.filter((itemId) => itemId !== id);
+      }
+      // UI only supports comparing up to two records at a time (see the
+      // "Select up to two saved records..." copy above the comparison charts).
+      if (current.length >= 2) {
+        return [current[1], id];
       }
       return [...current, id];
     });
@@ -605,6 +626,8 @@ export default function AnalyzeDataPage() {
           recommendation_reason: null,
           prediction_confidence: null,
           model_version: null,
+          latitude: latestReading?.latitude ?? null,
+          longitude: latestReading?.longitude ?? null,
         };
 
         const res = await apiClient.post('/telemetry/save-analysis', payload);
@@ -616,6 +639,8 @@ export default function AnalyzeDataPage() {
           createdAt: saved?.saved_at ?? saved?.created_at ?? new Date().toISOString(),
           soilMetrics,
           cropRecommendation: saved?.recommended_crop ?? 'Pending evaluation',
+          latitude: payload.latitude,
+          longitude: payload.longitude,
         };
 
         const nextItems = [entry, ...savedAnalyses];
@@ -854,6 +879,12 @@ export default function AnalyzeDataPage() {
             <Leaf className="w-4 h-4 mr-2" />
             Soil Health Score: {scoreLabel}
           </div>
+          {latestReading?.latitude != null && latestReading?.longitude != null && (
+            <div className="inline-flex items-center rounded-full px-3.5 py-2 text-sm font-semibold" style={{ background: 'hsl(280, 65%, 95%)', color: 'hsl(280, 65%, 35%)' }}>
+              <MapPin className="w-4 h-4 mr-2" />
+              GPS: {latestReading.latitude.toFixed(6)}, {latestReading.longitude.toFixed(6)}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -870,6 +901,19 @@ export default function AnalyzeDataPage() {
           <SensorCard icon={Beaker} label="TDS" value={latestReading?.tds?.toFixed(0) ?? '—'} unit="ppm" color="hsl(260, 65%, 45%)" bgColor="hsl(260, 65%, 94%)" />
           <SensorCard icon={Zap} label="Salinity" value={latestReading?.salinity?.toFixed(2) ?? '—'} unit="‰" color="hsl(208, 87%, 45%)" bgColor="hsl(208, 87%, 94%)" />
         </div>
+
+        {latestReading?.latitude != null && (
+          <>
+            <h3 className="mt-8 text-lg font-bold text-slate-800 dark:text-slate-200">GPS Diagnostics</h3>
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+              <SensorCard icon={Satellite} label="Satellites" value={latestReading?.gpsSatellites?.toString() ?? '—'} color="hsl(220, 70%, 50%)" bgColor="hsl(220, 70%, 95%)" />
+              <SensorCard icon={Target} label="HDOP" value={latestReading?.gpsHdop?.toFixed(2) ?? '—'} color="hsl(280, 70%, 50%)" bgColor="hsl(280, 70%, 95%)" />
+              <SensorCard icon={Mountain} label="Altitude" value={latestReading?.gpsAltitudeM?.toFixed(1) ?? '—'} unit="m" color="hsl(150, 70%, 40%)" bgColor="hsl(150, 70%, 95%)" />
+              <SensorCard icon={CheckCircle2} label="GPS Valid" value={latestReading?.gpsValid ? 'Yes' : 'No'} color={(latestReading?.gpsValid) ? "hsl(142, 65%, 40%)" : "hsl(0, 80%, 50%)"} bgColor={(latestReading?.gpsValid) ? "hsl(142, 65%, 94%)" : "hsl(0, 80%, 95%)"} />
+              <SensorCard icon={CheckCircle2} label="Quality OK" value={latestReading?.gpsQualityAcceptable ? 'Yes' : 'No'} color={(latestReading?.gpsQualityAcceptable) ? "hsl(142, 65%, 40%)" : "hsl(0, 80%, 50%)"} bgColor={(latestReading?.gpsQualityAcceptable) ? "hsl(142, 65%, 94%)" : "hsl(0, 80%, 95%)"} />
+            </div>
+          </>
+        )}
       </section>
 
       <section className="rounded-[1.5rem] p-6 animate-fade-in transition-all hover:shadow-[0_12px_40px_rgb(0,0,0,0.08)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative z-30">
@@ -1248,6 +1292,7 @@ export default function AnalyzeDataPage() {
                   <th className="px-3 py-2 text-left">Potassium (K)</th>
                   <th className="px-3 py-2 text-left">TDS</th>
                   <th className="px-3 py-2 text-left">Salinity</th>
+                  <th className="px-3 py-2 text-left">GPS</th>
                   <th className="px-3 py-2 text-left">Recommended crop</th>
                   <th className="px-3 py-2 text-left">Actions</th>
                 </tr>
@@ -1282,6 +1327,11 @@ export default function AnalyzeDataPage() {
                       <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.potassium)}</td>
                       <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.tds)}</td>
                       <td className="px-3 py-3" style={{ color: 'var(--muted-foreground)' }}>{formatMetricValue(item.soilMetrics.salinity)}</td>
+                      <td className="px-3 py-3 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                        {item.latitude != null && item.longitude != null 
+                          ? `${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}`
+                          : '—'}
+                      </td>
                       <td className="px-3 py-3" style={{ color: 'var(--foreground)' }}>{item.cropRecommendation}</td>
                       <td className="px-3 py-3">
                         <button
